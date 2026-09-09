@@ -35,6 +35,13 @@ export default defineConfig({
     // (chrome105 per the official template), WKWebView on macOS and WebKitGTK on
     // Linux (safari15 covers both).
     target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome105' : 'safari15',
+    // Two pages: the shell, and the tooltip window's single element.
+    rolldownOptions: {
+      input: {
+        index: 'index.html',
+        tooltip: 'tooltip.html',
+      },
+    },
   },
   envPrefix: ['VITE_', 'TAURI_'],
 })

@@ -18,6 +18,13 @@ fn main() {
             "sign_out",
             "shell_ready",
             "set_window_material",
+            "list_user_assets",
+            "open_user_assets_dir",
+            "reload_site",
+            "show_tooltip",
+            "hide_tooltip",
+            // Tooltip window
+            "tooltip_ready",
             // Bridge, callable from x.com
             "site_settings",
             "site_navigated",

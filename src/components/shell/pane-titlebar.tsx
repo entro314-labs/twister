@@ -6,13 +6,11 @@ import { RefreshCwIcon } from '@/components/icons/refresh-cw'
 import { SquarePenIcon } from '@/components/icons/square-pen'
 import { WindowControls } from '@/components/shell/window-controls'
 import { Button } from '@/components/ui/button'
-import { Kbd } from '@/components/ui/kbd'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAnimatedIcon } from '@/lib/animated-icon'
-import { IS_MACOS, MOD_KEY, SIDEBAR_RAIL_W, TITLEBAR_H, TITLEBAR_INSET_LEFT } from '@/lib/chrome'
-import { usePrefs } from '@/lib/prefs'
+import { MOD_KEY, TITLEBAR_H } from '@/lib/chrome'
 import { useNavigateSite, useSiteAction, useSiteState } from '@/lib/query'
 import type { SiteAction } from '@/lib/tauri/types'
+import { useTip, withHandlers } from '@/lib/tooltip'
 
 /**
  * The island's own titlebar. The island owning its chrome — rather than a shared band across the
@@ -24,12 +22,8 @@ export function PaneTitlebar() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const site = useSiteState()
   const go = useNavigateSite()
-  const { sidebarMode } = usePrefs()
   const [composeRef, composeHover] = useAnimatedIcon()
-
-  // With the sidebar collapsed to its rail, the macOS traffic lights reach
-  // past it into this band; the leading controls step aside for them.
-  const insetLeft = IS_MACOS && sidebarMode === 'rail' ? TITLEBAR_INSET_LEFT - SIDEBAR_RAIL_W : 12
+  const composeTip = useTip('New post', `${MOD_KEY}N`, 'bottom')
 
   const onIsland = pathname === '/'
   // X's title is empty for a moment on every load; the mark stands in for it.
@@ -39,8 +33,8 @@ export function PaneTitlebar() {
   return (
     <header
       data-tauri-drag-region
-      className="drag-region flex shrink-0 items-center gap-2 border-b border-border/50 pr-3"
-      style={{ height: TITLEBAR_H, paddingLeft: insetLeft }}
+      className="drag-region flex shrink-0 items-center gap-2 border-b border-border/50 px-3"
+      style={{ height: TITLEBAR_H }}
     >
       {onIsland ? (
         <div className="flex items-center gap-0.5">
@@ -56,7 +50,7 @@ export function PaneTitlebar() {
           onClick={() => {
             go.mutate('compose')
           }}
-          {...composeHover}
+          {...withHandlers(composeTip, composeHover)}
         >
           <SquarePenIcon ref={composeRef} data-icon="inline-start" />
           New post
@@ -80,30 +74,18 @@ function ActionButton({
 }) {
   const act = useSiteAction()
   const [iconRef, iconHover] = useAnimatedIcon()
+  const tip = useTip(label, `${MOD_KEY}${shortcut}`, 'bottom')
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={label}
-            onClick={() => {
-              act.mutate(action)
-            }}
-            {...iconHover}
-          >
-            <Icon ref={iconRef} size={15} />
-          </Button>
-        }
-      />
-      <TooltipContent side="bottom">
-        {label}
-        <Kbd>
-          {MOD_KEY}
-          {shortcut}
-        </Kbd>
-      </TooltipContent>
-    </Tooltip>
+    <Button
+      size="icon-sm"
+      variant="ghost"
+      aria-label={label}
+      onClick={() => {
+        act.mutate(action)
+      }}
+      {...withHandlers(tip, iconHover)}
+    >
+      <Icon ref={iconRef} size={15} />
+    </Button>
   )
 }

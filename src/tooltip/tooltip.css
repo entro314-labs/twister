@@ -1,0 +1,70 @@
+@import '@fontsource-variable/inter';
+@import '../styles/themes.css';
+
+/* The whole window is the tooltip: a transparent page holding one capsule. */
+html,
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  font-family: var(--app-font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.tip {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px 5px 10px;
+  border-radius: 8px;
+  background: var(--foreground);
+  color: var(--background);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--background) 12%, transparent),
+    0 4px 12px -2px oklch(0 0 0 / 0.35);
+}
+
+.tip kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--background) 16%, transparent);
+  color: color-mix(in oklab, var(--background) 82%, var(--foreground));
+  font-family: var(--app-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.tip-in {
+  animation: tip-in 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tip-in {
+    animation: none;
+  }
+}

@@ -22,6 +22,11 @@
     "allow-set-site-visible",
     "allow-sign-out",
     "allow-shell-ready",
-    "allow-set-window-material"
+    "allow-set-window-material",
+    "allow-list-user-assets",
+    "allow-open-user-assets-dir",
+    "allow-reload-site",
+    "allow-show-tooltip",
+    "allow-hide-tooltip"
   ]
 }

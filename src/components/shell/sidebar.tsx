@@ -12,8 +12,6 @@ import * as React from 'react'
 import { PanelLeftCloseIcon } from '@/components/icons/panel-left-close'
 import { PanelLeftOpenIcon } from '@/components/icons/panel-left-open'
 import { SettingsIcon } from '@/components/icons/settings'
-import { Kbd } from '@/components/ui/kbd'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAnimatedIcon } from '@/lib/animated-icon'
 import {
   APP_NAME,
@@ -28,6 +26,7 @@ import {
 import { usePrefs } from '@/lib/prefs'
 import { useNavigateSite, useSiteState } from '@/lib/query'
 import type { Destination, Section } from '@/lib/tauri/types'
+import { useTip, withHandlers } from '@/lib/tooltip'
 import { cn } from '@/lib/utils'
 
 interface NavItem {
@@ -150,15 +149,20 @@ function FullContent() {
 function RailContent() {
   return (
     <div className="flex h-full flex-col" style={{ width: SIDEBAR_RAIL_W }}>
+      {/* On macOS the traffic lights own this band; the toggle takes the next
+          row, on the same axis as every icon under it. */}
       <header
         data-tauri-drag-region
-        className="drag-region flex shrink-0 items-end justify-center pb-1"
-        // On macOS the traffic lights own this band, so the rail's toggle drops
-        // below them instead of colliding with the close button.
-        style={{ height: IS_MACOS ? TITLEBAR_H + 24 : TITLEBAR_H }}
+        className="drag-region flex shrink-0 items-center justify-center"
+        style={{ height: TITLEBAR_H }}
       >
-        <LayoutButton />
+        {IS_MACOS ? null : <LayoutButton rail />}
       </header>
+      {IS_MACOS ? (
+        <div className="flex shrink-0 justify-center pb-1">
+          <LayoutButton rail />
+        </div>
+      ) : null}
       <nav className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto py-1">
         {NAV.map((item) => (
           <NavRow key={item.destination} item={item} rail />
@@ -212,12 +216,14 @@ function NavRow({ item, rail = false }: { item: NavItem; rail?: boolean }) {
   const disabled = item.destination === 'profile' && !site.data?.handle
   const unread = item.section === 'notifications' ? (site.data?.unread ?? 0) : 0
   const Icon = item.icon
+  const tip = useTip(item.label, `${MOD_KEY}${item.shortcut}`)
 
-  const button = (
+  return (
     <button
       type="button"
       aria-current={active ? 'page' : undefined}
       disabled={disabled}
+      {...tip}
       onClick={() => {
         go.mutate(item.destination)
         if (!onIsland) void navigate({ to: '/' })
@@ -246,31 +252,19 @@ function NavRow({ item, rail = false }: { item: NavItem; rail?: boolean }) {
       )}
     </button>
   )
-
-  return (
-    <Tooltip>
-      <TooltipTrigger render={button} />
-      <TooltipContent side="right">
-        {item.label}
-        <Kbd>
-          {MOD_KEY}
-          {item.shortcut}
-        </Kbd>
-      </TooltipContent>
-    </Tooltip>
-  )
 }
 
 function SettingsRow({ rail = false }: { rail?: boolean }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const active = pathname.startsWith('/settings')
   const [iconRef, iconHover] = useAnimatedIcon()
+  const tip = useTip('Settings', `${MOD_KEY},`)
 
-  const link = (
+  return (
     <Link
       to="/settings"
       aria-current={active ? 'page' : undefined}
-      {...iconHover}
+      {...withHandlers(tip, iconHover)}
       className={rowClass(active, rail)}
     >
       <ActiveMarker active={active} />
@@ -278,32 +272,28 @@ function SettingsRow({ rail = false }: { rail?: boolean }) {
       {rail ? null : <span className="truncate">Settings</span>}
     </Link>
   )
-
-  if (!rail) return link
-  return (
-    <Tooltip>
-      <TooltipTrigger render={link} />
-      <TooltipContent side="right">
-        Settings
-        <Kbd>{MOD_KEY},</Kbd>
-      </TooltipContent>
-    </Tooltip>
-  )
 }
 
-function LayoutButton() {
+function LayoutButton({ rail = false }: { rail?: boolean }) {
   const { sidebarMode, setSidebarMode } = usePrefs()
   const Icon = sidebarMode === 'full' ? PanelLeftCloseIcon : PanelLeftOpenIcon
   const [iconRef, iconHover] = useAnimatedIcon()
+  const label = sidebarMode === 'full' ? 'Collapse the sidebar' : 'Expand the sidebar'
+  const tip = useTip(label, `${MOD_KEY}\\`)
   return (
     <button
       type="button"
-      aria-label={sidebarMode === 'full' ? 'Collapse the sidebar' : 'Expand the sidebar'}
+      aria-label={label}
       onClick={() => {
         setSidebarMode(sidebarMode === 'full' ? 'rail' : 'full')
       }}
-      {...iconHover}
-      className="mr-2 ml-auto grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+      {...withHandlers(tip, iconHover)}
+      className={cn(
+        'grid shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground',
+        // In the rail the toggle is one of the icons and sits on their axis;
+        // in the full sidebar it is the header's trailing control.
+        rail ? 'size-9' : 'mr-2 ml-auto size-7',
+      )}
     >
       <Icon ref={iconRef} size={16} />
     </button>

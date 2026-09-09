@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { invokeCommand } from '@/lib/tauri/client'
 import { IPC_COMMANDS } from '@/lib/tauri/ipc'
-import type { Destination, Settings, SiteAction, SiteState } from '@/lib/tauri/types'
+import type { Destination, Settings, SiteAction, SiteState, UserAssets } from '@/lib/tauri/types'
 
 import { queryKeys } from './keys'
 
@@ -30,6 +30,17 @@ export function useSiteState() {
     queryKey: queryKeys.site.state(),
     queryFn: async () => invokeCommand<SiteState>(IPC_COMMANDS.getSiteState),
     staleTime: Number.POSITIVE_INFINITY,
+  })
+}
+
+/** What is in the scripts and styles folder right now — not what is running. */
+export function useUserAssets() {
+  return useQuery({
+    queryKey: queryKeys.userland.list(),
+    queryFn: async () => invokeCommand<UserAssets>(IPC_COMMANDS.listUserAssets),
+    // The folder changes behind the app's back, so the list is re-read each
+    // time the settings screen shows it.
+    staleTime: 0,
   })
 }
 
@@ -67,5 +78,22 @@ export function useSiteAction() {
 export function useSignOut() {
   return useMutation({
     mutationFn: async () => invokeCommand<Nothing>(IPC_COMMANDS.signOut),
+  })
+}
+
+export function useOpenUserAssetsDir() {
+  return useMutation({
+    mutationFn: async () => invokeCommand<Nothing>(IPC_COMMANDS.openUserAssetsDir),
+  })
+}
+
+/** Rebuilds the site view so folder changes start running; the page reloads. */
+export function useReloadSite() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async () => invokeCommand<Nothing>(IPC_COMMANDS.reloadSite),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.userland.root })
+    },
   })
 }

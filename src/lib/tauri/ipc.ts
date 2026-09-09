@@ -14,6 +14,11 @@ export const IPC_COMMANDS = {
   signOut: 'sign_out',
   shellReady: 'shell_ready',
   setWindowMaterial: 'set_window_material',
+  listUserAssets: 'list_user_assets',
+  openUserAssetsDir: 'open_user_assets_dir',
+  reloadSite: 'reload_site',
+  showTooltip: 'show_tooltip',
+  hideTooltip: 'hide_tooltip',
 } as const
 
 export const IPC_EVENTS = {

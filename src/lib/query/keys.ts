@@ -8,4 +8,8 @@ export const queryKeys = {
     root: ['site'] as const,
     state: () => [...queryKeys.site.root, 'state'] as const,
   },
+  userland: {
+    root: ['userland'] as const,
+    list: () => [...queryKeys.userland.root, 'list'] as const,
+  },
 } as const

@@ -10,6 +10,8 @@ mod error;
 mod menu;
 mod settings;
 mod site;
+mod tooltip;
+mod userland;
 mod windowing;
 
 use std::sync::Mutex;
@@ -67,6 +69,11 @@ pub fn run() {
                 remember_bounds(window.app_handle());
             }
             WindowEvent::Moved(_) => remember_bounds(window.app_handle()),
+            // A tooltip left showing over another app is the one way this
+            // window could look broken while it is not even in front.
+            WindowEvent::Focused(false) => {
+                let _ = tooltip::hide(window.app_handle());
+            }
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
@@ -80,6 +87,12 @@ pub fn run() {
             commands::sign_out,
             commands::shell_ready,
             commands::set_window_material,
+            commands::list_user_assets,
+            commands::open_user_assets_dir,
+            commands::reload_site,
+            commands::show_tooltip,
+            commands::hide_tooltip,
+            commands::tooltip_ready,
             commands::site_settings,
             commands::site_navigated,
             commands::site_profile,
@@ -108,6 +121,7 @@ fn setup(app: &mut tauri::App) -> std::result::Result<(), Box<dyn std::error::Er
         bounds: Mutex::new(saved),
         store,
     });
+    app.manage(tooltip::Tooltip::default());
 
     let window = build_window(app, saved)?;
     windowing::apply_material(&window, &settings.window_material);
@@ -122,6 +136,7 @@ fn setup(app: &mut tauri::App) -> std::result::Result<(), Box<dyn std::error::Er
 
     // Added second, so it sits above the shell. The island is its territory.
     site::build(app.handle(), &window, settings.niceties)?;
+    tooltip::create(app.handle(), &window)?;
 
     // The shell shows the window once it has painted. If it never does — a
     // dev server that is not running, a broken build — a window is still

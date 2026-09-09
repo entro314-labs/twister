@@ -71,9 +71,17 @@ pub struct Niceties {
     /// Drop the view counter from each post's action bar.
     pub hide_view_counts: bool,
     /// Drop X's own left navigation entirely — Twister's sidebar covers it.
+    /// On by default: two navigation columns is the one thing a wrapper must
+    /// not show.
     pub hide_site_nav: bool,
     /// Mirror the unread count from the page title onto the Dock icon.
     pub dock_badge: bool,
+    /// Drop the floating Grok and Messages drawers X pins to the bottom-right.
+    pub hide_drawers: bool,
+    /// The bird in place of the X mark, and the classic blue on the buttons.
+    pub classic_bird: bool,
+    /// X's retired Dim theme, painted over Lights out.
+    pub dim: bool,
 }
 
 impl Default for Niceties {
@@ -84,8 +92,11 @@ impl Default for Niceties {
             hide_right_column: false,
             hide_extras_nav: true,
             hide_view_counts: false,
-            hide_site_nav: false,
+            hide_site_nav: true,
             dock_badge: true,
+            hide_drawers: false,
+            classic_bird: false,
+            dim: false,
         }
     }
 }
@@ -182,7 +193,7 @@ mod tests {
         assert_eq!(parsed, Settings::default());
         assert!(parsed.niceties.chronological_home);
         assert!(parsed.niceties.hide_promoted);
-        assert!(!parsed.niceties.hide_site_nav);
+        assert!(parsed.niceties.hide_site_nav);
     }
 
     #[test]

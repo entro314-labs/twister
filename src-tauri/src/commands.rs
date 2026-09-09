@@ -6,9 +6,11 @@ use std::sync::Mutex;
 
 use tauri::{AppHandle, Manager, State};
 
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Result, internal};
 use crate::settings::{Niceties, Settings, Store, WindowBounds};
 use crate::site::{self, Action, Destination, Insets, Site, SiteState};
+use crate::tooltip::{self, Anchor, Content};
+use crate::userland::{self, UserAssets};
 
 pub struct AppState {
     pub store: Store,
@@ -99,6 +101,41 @@ pub fn set_window_material(app: AppHandle, material: String) -> Result<String> {
         .get_window(crate::MAIN_WINDOW)
         .ok_or_else(|| AppError::NotFound("The main window is gone.".into()))?;
     Ok(crate::windowing::apply_material(&window, &material))
+}
+
+#[tauri::command]
+pub fn list_user_assets() -> Result<UserAssets> {
+    userland::list()
+}
+
+#[tauri::command]
+pub fn open_user_assets_dir() -> Result<()> {
+    let dir = userland::dir()?;
+    tauri_plugin_opener::open_path(dir, None::<&str>)
+        .map_err(|err| internal("Opening the scripts folder", err))
+}
+
+/// Rebuilds the site webview so scripts and styles added to the folder start
+/// running. The page reloads; that is the cost of an initialization script.
+#[tauri::command]
+pub fn reload_site(app: AppHandle) -> Result<()> {
+    site::rebuild(&app)
+}
+
+#[tauri::command]
+pub fn show_tooltip(app: AppHandle, anchor: Anchor, content: Content) -> Result<()> {
+    tooltip::show(&app, anchor, content)
+}
+
+#[tauri::command]
+pub fn hide_tooltip(app: AppHandle) -> Result<()> {
+    tooltip::hide(&app)
+}
+
+/// Called by the tooltip page once it has rendered and measured its content.
+#[tauri::command]
+pub fn tooltip_ready(app: AppHandle, width: f64, height: f64) -> Result<()> {
+    tooltip::ready(&app, width, height)
 }
 
 // ─── Bridge (callable from x.com) ───────────────────────────────────────────

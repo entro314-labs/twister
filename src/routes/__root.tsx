@@ -11,7 +11,6 @@ import * as React from 'react'
 import { PaneTitlebar } from '@/components/shell/pane-titlebar'
 import { Sidebar } from '@/components/shell/sidebar'
 import { StatusBar } from '@/components/shell/status-bar'
-import { TooltipProvider } from '@/components/ui/tooltip'
 import { pageVariants } from '@/lib/motion'
 import { PrefsProvider, usePrefs } from '@/lib/prefs'
 import { useSettings } from '@/lib/query'
@@ -52,14 +51,12 @@ function RootShell() {
   return (
     <ThemeProvider settings={settings.data}>
       <PrefsProvider>
-        <TooltipProvider delay={250} closeDelay={100}>
-          {/* The CSS reduced-motion rule only reaches CSS animations. Motion drives its own, so
-              it has to be told about the setting separately. */}
-          <MotionConfig reducedMotion="user">
-            <ShellActionListener />
-            <ShellLayout />
-          </MotionConfig>
-        </TooltipProvider>
+        {/* The CSS reduced-motion rule only reaches CSS animations. Motion drives its own, so
+            it has to be told about the setting separately. */}
+        <MotionConfig reducedMotion="user">
+          <ShellActionListener />
+          <ShellLayout />
+        </MotionConfig>
       </PrefsProvider>
     </ThemeProvider>
   )

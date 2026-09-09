@@ -11,6 +11,7 @@
 //! `site/niceties.css`. This file only knows URLs and titles.
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
@@ -22,8 +23,8 @@ use url::Url;
 
 use crate::error::{AppError, Result};
 use crate::settings::Niceties;
+use crate::userland;
 
-pub const LABEL: &str = "site";
 pub const SHELL_LABEL: &str = "shell";
 pub const HOME: &str = "https://x.com/home";
 
@@ -134,6 +135,14 @@ pub struct Site {
     pub insets: Mutex<Insets>,
     /// The last niceties applied, so a fresh page load bakes them in.
     pub niceties: Mutex<Niceties>,
+    /// Whether the shell wants the site showing. Re-applied after a rebuild.
+    pub visible: AtomicBool,
+    /// The webview's current label. A rebuild closes the old webview and adds
+    /// a new one, and the manager only forgets a label once the close has
+    /// gone through — so every build gets a fresh one (`site-1`, `site-2`…),
+    /// and the capability file grants `site-*`.
+    pub label: Mutex<String>,
+    generation: AtomicU32,
 }
 
 impl Site {
@@ -147,7 +156,19 @@ impl Site {
             }),
             insets: Mutex::new(Insets::default()),
             niceties: Mutex::new(niceties),
+            visible: AtomicBool::new(true),
+            label: Mutex::new(String::new()),
+            generation: AtomicU32::new(0),
         }
+    }
+
+    fn next_label(&self) -> String {
+        let n = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let label = format!("site-{n}");
+        if let Ok(mut current) = self.label.lock() {
+            current.clone_from(&label);
+        }
+        label
     }
 }
 
@@ -275,13 +296,17 @@ pub fn bounds_for(
     )
 }
 
-fn init_script(niceties: Niceties) -> String {
-    // Both substitutions are JSON, which is valid JavaScript for a string and
-    // an object literal alike.
+fn init_script(niceties: Niceties, user_styles: &[(String, String)]) -> String {
+    // Every substitution is JSON, which is valid JavaScript for a string, an
+    // array and an object literal alike.
     BRIDGE_JS
         .replace(
             "__TWISTER_CSS__",
             &serde_json::to_string(NICETIES_CSS).unwrap_or_else(|_| "\"\"".into()),
+        )
+        .replace(
+            "__TWISTER_USER_CSS__",
+            &serde_json::to_string(user_styles).unwrap_or_else(|_| "[]".into()),
         )
         .replace(
             "__TWISTER_NICETIES__",
@@ -297,7 +322,20 @@ fn init_script(niceties: Niceties) -> String {
 pub fn build(app: &AppHandle, window: &Window, niceties: Niceties) -> tauri::Result<Webview> {
     let scale = window.scale_factor()?;
     let size: LogicalSize<f64> = window.inner_size()?.to_logical(scale);
-    let (position, bounds) = bounds_for(Insets::default(), size);
+    let insets = site(app)
+        .site
+        .insets
+        .lock()
+        .map_or_else(|_| Insets::default(), |i| *i);
+    let (position, bounds) = bounds_for(insets, size);
+    let label = site(app).site.next_label();
+
+    // The user's own scripts and styles, read fresh on every build: a reload
+    // from Settings is a rebuild, and this is where it picks the changes up.
+    let assets = userland::load().unwrap_or_else(|err| {
+        log::warn!("user scripts and styles unavailable: {err}");
+        userland::Loaded::default()
+    });
 
     let start = Url::parse(HOME).map_err(tauri::Error::InvalidUrl)?;
 
@@ -306,8 +344,12 @@ pub fn build(app: &AppHandle, window: &Window, niceties: Niceties) -> tauri::Res
     let title_handle = app.clone();
     let load_handle = app.clone();
 
-    let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(start))
-        .initialization_script(init_script(niceties))
+    let mut builder = WebviewBuilder::new(&label, WebviewUrl::External(start))
+        .initialization_script(init_script(niceties, &assets.styles));
+    for (name, source) in &assets.scripts {
+        builder = builder.initialization_script(userland::wrap_script(name, source));
+    }
+    let builder = builder
         .devtools(cfg!(debug_assertions))
         .on_navigation(move |url| {
             if allows(url) {
@@ -342,6 +384,10 @@ pub fn build(app: &AppHandle, window: &Window, niceties: Niceties) -> tauri::Res
         .on_page_load(move |_, payload| {
             let url = payload.url().to_string();
             let loading = matches!(payload.event(), PageLoadEvent::Started);
+            log::debug!(
+                "page load {}: {url}",
+                if loading { "started" } else { "finished" }
+            );
             update(&load_handle, |state| {
                 state.section = section_for(&url, state.handle.as_deref());
                 state.url = url;
@@ -349,11 +395,44 @@ pub fn build(app: &AppHandle, window: &Window, niceties: Niceties) -> tauri::Res
             });
         });
 
-    window.add_child(builder, position, bounds)
+    let webview = window.add_child(builder, position, bounds)?;
+    if !site(app).site.visible.load(Ordering::Relaxed) {
+        let _ = webview.hide();
+    }
+    Ok(webview)
+}
+
+/// Closes the site webview and creates it again, which is the only way to
+/// change its initialization scripts — and therefore how a user script or
+/// style added to the folder starts running.
+pub fn rebuild(app: &AppHandle) -> Result<()> {
+    let window = app
+        .get_window(crate::MAIN_WINDOW)
+        .ok_or_else(|| AppError::NotFound("The main window is gone.".into()))?;
+    if let Ok(old) = webview(app) {
+        old.close()?;
+    }
+    let niceties = site(app)
+        .site
+        .niceties
+        .lock()
+        .map_or_else(|_| Niceties::default(), |n| *n);
+    update(app, |state| {
+        state.loading = true;
+        state.url = HOME.into();
+        state.section = Section::Home;
+    });
+    build(app, &window, niceties)?;
+    Ok(())
 }
 
 fn webview(app: &AppHandle) -> Result<Webview> {
-    app.get_webview(LABEL)
+    let label = site(app)
+        .site
+        .label
+        .lock()
+        .map_or_else(|_| String::new(), |l| l.clone());
+    app.get_webview(&label)
         .ok_or_else(|| AppError::NotFound("The site webview is gone.".into()))
 }
 
@@ -428,6 +507,10 @@ pub fn navigate(app: &AppHandle, url: &str) -> Result<()> {
     Ok(())
 }
 
+/// Sends the site to a destination through X's own navigation when the bridge
+/// is there to click it, and by a full load otherwise. The distinction is
+/// what keeps a sidebar click instant — and what makes the compose modal open
+/// at all: loaded cold, `/compose/post` never gets past X's splash screen.
 pub fn go(app: &AppHandle, destination: Destination) -> Result<()> {
     let handle = site(app)
         .site
@@ -435,7 +518,14 @@ pub fn go(app: &AppHandle, destination: Destination) -> Result<()> {
         .lock()
         .map(|state| state.handle.clone())
         .unwrap_or_default();
-    navigate(app, &destination_url(destination, handle.as_deref())?)
+    let url = destination_url(destination, handle.as_deref())?;
+    let parsed = Url::parse(&url).map_err(|e| AppError::Internal(e.to_string()))?;
+    let path = serde_json::to_string(parsed.path())?;
+    let href = serde_json::to_string(&url)?;
+    webview(app)?.eval(format!(
+        "(window.__twister && window.__twister.go({path})) || location.assign({href})"
+    ))?;
+    Ok(())
 }
 
 pub fn act(app: &AppHandle, action: Action) -> Result<()> {
@@ -496,6 +586,7 @@ pub fn set_insets(app: &AppHandle, insets: Insets) -> Result<()> {
 }
 
 pub fn set_visible(app: &AppHandle, visible: bool) -> Result<()> {
+    site(app).site.visible.store(visible, Ordering::Relaxed);
     let webview = webview(app)?;
     if visible {
         webview.show()?;
@@ -543,6 +634,7 @@ pub fn bridge_navigated(app: &AppHandle, url: &str) {
     if !allows(&parsed) {
         return;
     }
+    log::debug!("in-app navigation: {url}");
     update(app, |state| {
         state.section = section_for(url, state.handle.as_deref());
         state.url = url.to_string();
@@ -703,9 +795,14 @@ mod tests {
 
     #[test]
     fn init_script_carries_css_and_niceties_as_json() {
-        let script = init_script(Niceties::default());
+        let script = init_script(
+            Niceties::default(),
+            &[("dim.css".to_string(), "html{color:red}".to_string())],
+        );
         assert!(!script.contains("__TWISTER_CSS__"));
         assert!(!script.contains("__TWISTER_NICETIES__"));
+        assert!(!script.contains("__TWISTER_USER_CSS__"));
+        assert!(script.contains("[[\"dim.css\",\"html{color:red}\"]]"));
         assert!(script.contains("\"chronologicalHome\":true"));
         assert!(script.contains("data-twister-hide-promoted"));
     }

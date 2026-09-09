@@ -16,11 +16,16 @@ export const TITLEBAR_INSET_LEFT = 94
 export const SIDEBAR_DEFAULT_W = 236
 export const SIDEBAR_MIN_W = 190
 export const SIDEBAR_MAX_W = 340
-export const SIDEBAR_RAIL_W = 56
-
 /** MacOS draws its own traffic lights; the other two need ours. */
 export const IS_MACOS =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? '')
+
+/**
+ * Wide enough on macOS for the three traffic lights (which end near 77px) to sit inside it, so the
+ * rail's toggle and its icons line up beneath them on one axis instead of colliding with the
+ * island's titlebar.
+ */
+export const SIDEBAR_RAIL_W = IS_MACOS ? 84 : 56
 
 /** The modifier glyph for shortcut hints. */
 export const MOD_KEY = IS_MACOS ? '⌘' : 'Ctrl'

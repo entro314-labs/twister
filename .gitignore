@@ -15,3 +15,6 @@ src-tauri/gen
 .idea
 *.swp
 *.tsbuildinfo
+
+# Reference repositories gathered for inspiration; not part of the build.
+refs/

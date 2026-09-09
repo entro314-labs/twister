@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tooltip-ready"
+description = "Enables the tooltip_ready command without any pre-configured scope."
+commands.allow = ["tooltip_ready"]
+
+[[permission]]
+identifier = "deny-tooltip-ready"
+description = "Denies the tooltip_ready command without any pre-configured scope."
+commands.deny = ["tooltip_ready"]

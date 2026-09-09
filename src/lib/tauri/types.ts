@@ -15,6 +15,9 @@ export interface Niceties {
   hideViewCounts: boolean
   hideSiteNav: boolean
   dockBadge: boolean
+  hideDrawers: boolean
+  classicBird: boolean
+  dim: boolean
 }
 
 /** `settings::Settings` */
@@ -75,3 +78,19 @@ export interface Notice {
 
 /** `menu::ShellAction`, delivered on `twister://shell`. */
 export type ShellAction = 'openSettings' | 'toggleSidebar'
+
+/** `userland::UserAsset` — one file in the scripts or styles folder. */
+export interface UserAsset {
+  name: string
+  bytes: number
+}
+
+/** `userland::UserAssets` */
+export interface UserAssets {
+  scripts: UserAsset[]
+  styles: UserAsset[]
+  dir: string
+}
+
+/** `tooltip::Side` */
+export type TooltipSide = 'right' | 'bottom'

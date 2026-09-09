@@ -34,11 +34,36 @@ Twister frames it. Nothing you read or write passes through Twister.
   - *Hide view counts.*
   - *Hide X's navigation entirely* — Twister's sidebar carries the same
     destinations.
+  - *Hide the floating drawers* — the Grok and Messages panels in the corner.
+  - *The bird* — the blue bird in place of the X mark, and the classic blue on
+    Post and Follow.
+  - *Dim* — X's retired blue-grey dark theme, painted over Lights out. Built
+    by reading X's own stylesheet for every rule that paints a Lights-out
+    colour and shadowing it, so it needs no class names of X's.
   - *Unread count on the Dock icon*, mirrored from the page title.
+- **Your own scripts and styles.** Two folders in the app data directory,
+  `scripts/` and `styles/`. Every `*.js` runs on every X page once the DOM is
+  ready, the way a Tampermonkey script does (minus the `GM_*` API); every
+  `*.css` is applied at document start. Injected as initialization scripts,
+  which X's content-security policy cannot block. Settings lists what is in
+  the folders, opens them, and reloads.
+- **Tooltips that float.** The site view sits above the frame, so a tooltip
+  drawn by the frame would vanish under it. Tooltips are a tiny child window
+  of their own, styled with the app's theme and drawn by the OS above
+  everything.
 - **Links leave.** Anything that is not X opens in your browser, and the status
   bar says so. `t.co` redirects are followed to their real target first.
 - **Closing hides.** The session stays warm and the badge keeps counting;
   reopen from the Dock, quit with ⌘Q. Window placement is remembered.
+
+## Where the ideas came from
+
+The niceties borrow from the extension world, adapted rather than copied:
+zen-view-for-x's two-net promoted-post detection and its Messages exemption
+for the right column; TwitterBirdIsBack's bird path, blue buttons, drawer
+selectors and locale-independent Grok detection by route and glyph; the
+positional "Following" tab fallback from hummingbird. Nothing here calls X's
+private API.
 
 ## The one honest caveat
 

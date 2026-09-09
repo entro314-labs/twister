@@ -7,7 +7,15 @@ import { Kbd } from '@/components/ui/kbd'
 import { Select } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { MOD_KEY } from '@/lib/chrome'
-import { useSettings, useSignOut, useSiteState, useUpdateSettings } from '@/lib/query'
+import {
+  useOpenUserAssetsDir,
+  useReloadSite,
+  useSettings,
+  useSignOut,
+  useSiteState,
+  useUpdateSettings,
+  useUserAssets,
+} from '@/lib/query'
 import { humanMessage } from '@/lib/tauri/client'
 import type { Niceties, Settings } from '@/lib/tauri/types'
 
@@ -46,7 +54,22 @@ const NICETIES: Array<{ key: keyof Niceties; label: string; hint: string }> = [
   {
     key: 'hideSiteNav',
     label: 'Hide X’s navigation entirely',
-    hint: 'Twister’s sidebar and the View menu carry the same destinations. X’s own compose button and account menu go with it.',
+    hint: 'Twister’s sidebar and the View menu carry the same destinations. X’s own compose button and account menu go with it; Sign out lives in Settings.',
+  },
+  {
+    key: 'hideDrawers',
+    label: 'Hide the floating drawers',
+    hint: 'The Grok and Messages panels X pins to the bottom-right corner.',
+  },
+  {
+    key: 'classicBird',
+    label: 'The bird',
+    hint: 'The blue bird in place of the X mark, and the classic blue on Post and Follow.',
+  },
+  {
+    key: 'dim',
+    label: 'Dim',
+    hint: 'X’s retired blue-grey dark theme, painted over Lights out. Set X itself to Lights out for it to take.',
   },
   {
     key: 'dockBadge',
@@ -147,6 +170,8 @@ function SettingsScreen() {
         ))}
       </Section>
 
+      <UserlandSection />
+
       <AccountSection />
 
       <Section title="Shortcuts" note="These work whichever part of the window has focus.">
@@ -232,6 +257,83 @@ function AccountSection() {
       {error ? <p className="px-3 py-2 text-xs text-destructive">{error}</p> : null}
     </Section>
   )
+}
+
+/**
+ * The user's own scripts and styles: the Tampermonkey and Stylus of this client. Files in two
+ * folders, read when the site view is built, so a change needs a reload — which rebuilds the view.
+ */
+function UserlandSection() {
+  const assets = useUserAssets()
+  const openDir = useOpenUserAssetsDir()
+  const reload = useReloadSite()
+  const [error, setError] = React.useState<string | null>(null)
+
+  const run = (mutation: { mutateAsync: () => Promise<unknown> }) => {
+    void (async () => {
+      try {
+        await mutation.mutateAsync()
+        setError(null)
+      } catch (err) {
+        setError(humanMessage(err))
+      }
+    })()
+  }
+
+  const scripts = assets.data?.scripts ?? []
+  const styles = assets.data?.styles ?? []
+
+  return (
+    <Section
+      title="Scripts and styles"
+      note="Your own userscripts and userstyles, injected into X on every page. Drop *.js into the scripts folder and *.css into the styles folder; scripts run once the page is ready, like Tampermonkey's default, minus the GM_* API. Files load in name order."
+    >
+      <Row
+        label={
+          scripts.length + styles.length === 0
+            ? 'Nothing in the folders yet'
+            : `${scripts.length} script${scripts.length === 1 ? '' : 's'}, ${styles.length} style${styles.length === 1 ? '' : 's'}`
+        }
+        hint={assets.data?.dir}
+      >
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              run(openDir)
+            }}
+          >
+            Open folder
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              run(reload)
+            }}
+          >
+            Reload
+          </Button>
+        </div>
+      </Row>
+      {[...scripts, ...styles].map((asset) => (
+        <div
+          key={asset.name}
+          className="flex items-center gap-3 px-3 py-2 font-mono text-xs text-muted-foreground"
+        >
+          <span className="truncate text-foreground">{asset.name}</span>
+          <span className="ml-auto shrink-0 tabular-nums">{formatBytes(asset.bytes)}</span>
+        </div>
+      ))}
+      {error ? <p className="px-3 py-2 text-xs text-destructive">{error}</p> : null}
+    </Section>
+  )
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  return `${(bytes / 1024).toFixed(bytes >= 10_240 ? 0 : 1)} KB`
 }
 
 function AboutSection() {
