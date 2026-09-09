@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-site-profile"
+description = "Enables the site_profile command without any pre-configured scope."
+commands.allow = ["site_profile"]
+
+[[permission]]
+identifier = "deny-site-profile"
+description = "Denies the site_profile command without any pre-configured scope."
+commands.deny = ["site_profile"]

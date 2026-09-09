@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#34b4ff"/>
+      <stop offset="1" stop-color="#0a63c4"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.2"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#bg)"/>
+  <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#sheen)"/>
+  <!-- A funnel drawn as tilted, shrinking rings that slide to the right on the way down. -->
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-width="58">
+    <ellipse cx="500" cy="300" rx="250" ry="66" transform="rotate(-8 500 300)"/>
+    <path d="M330 420 C 380 480, 600 480, 656 420" transform="rotate(-8 500 440)"/>
+    <path d="M392 536 C 430 588, 594 588, 632 540"/>
+    <path d="M456 650 C 486 690, 592 690, 618 656"/>
+    <path d="M528 758 C 548 786, 606 786, 620 764"/>
+    <path d="M598 848 C 606 862, 630 862, 636 852"/>
+  </g>
+</svg>

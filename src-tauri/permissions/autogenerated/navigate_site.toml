@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-navigate-site"
+description = "Enables the navigate_site command without any pre-configured scope."
+commands.allow = ["navigate_site"]
+
+[[permission]]
+identifier = "deny-navigate-site"
+description = "Denies the navigate_site command without any pre-configured scope."
+commands.deny = ["navigate_site"]

@@ -1,0 +1,48 @@
+/*
+ * The niceties, as CSS. Every rule here is a selector on X's own DOM, which X
+ * ships changes to without notice — so this file and bridge.js are the ONLY
+ * places that name one, and each rule is gated on an attribute the bridge
+ * stamps on <html> from the user's settings. A stale selector turns a nicety
+ * into a no-op, never into a broken page.
+ *
+ * Injected as a constructed stylesheet, which X's content-security policy
+ * cannot block the way it could an inline <style>.
+ */
+
+/* Promoted posts sit inside a placement-tracking wrapper in every timeline. */
+html[data-twister-hide-promoted] [data-testid="placementTracking"] {
+  display: none !important;
+}
+
+/* The right column: trends, who to follow, premium, the lot. */
+html[data-twister-hide-right-column] [data-testid="sidebarColumn"] {
+  display: none !important;
+}
+
+/* The non-timeline entries in X's left navigation, the premium box under it,
+   and the Grok button X puts in every post's action bar. Hrefs verified
+   against x.com on 2026-09-10. */
+html[data-twister-hide-extras-nav] a[href="/i/grok"],
+html[data-twister-hide-extras-nav] a[href="/i/history"],
+html[data-twister-hide-extras-nav] a[href="/i/jf/creators/studio"],
+html[data-twister-hide-extras-nav] a[href="/i/premium_sign_up"],
+html[data-twister-hide-extras-nav] [data-testid="premium-signup-tab"],
+html[data-twister-hide-extras-nav] a[href="/i/verified-orgs-signup"],
+html[data-twister-hide-extras-nav] a[href="/jobs"],
+html[data-twister-hide-extras-nav] a[href="/business"],
+html[data-twister-hide-extras-nav] a[href="/i/monetization"],
+html[data-twister-hide-extras-nav] a[href="/i/communitynotes"],
+html[data-twister-hide-extras-nav] [data-testid="super-upsell-UpsellCardRenderProperties"],
+html[data-twister-hide-extras-nav] [aria-label="Grok actions"] {
+  display: none !important;
+}
+
+/* The view counter is the analytics link in a post's action bar. */
+html[data-twister-hide-view-counts] article a[href$="/analytics"] {
+  display: none !important;
+}
+
+/* X's whole left navigation. Twister's sidebar and menu carry the same destinations. */
+html[data-twister-hide-site-nav] header[role="banner"] {
+  display: none !important;
+}

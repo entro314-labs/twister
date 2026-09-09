@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-site-insets"
+description = "Enables the set_site_insets command without any pre-configured scope."
+commands.allow = ["set_site_insets"]
+
+[[permission]]
+identifier = "deny-set-site-insets"
+description = "Denies the set_site_insets command without any pre-configured scope."
+commands.deny = ["set_site_insets"]

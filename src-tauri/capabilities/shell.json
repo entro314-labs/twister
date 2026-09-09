@@ -1,0 +1,27 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "shell",
+  "description": "Twister's own webview: the sidebar, titlebar, status bar and settings.",
+  "webviews": ["shell"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized",
+    "core:app:allow-version",
+    "core:event:default",
+    "opener:allow-open-url",
+    "allow-get-settings",
+    "allow-update-settings",
+    "allow-get-site-state",
+    "allow-navigate-site",
+    "allow-site-action",
+    "allow-set-site-insets",
+    "allow-set-site-visible",
+    "allow-sign-out",
+    "allow-shell-ready",
+    "allow-set-window-material"
+  ]
+}

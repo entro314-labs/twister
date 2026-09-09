@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "site",
+  "description": "x.com, reached only through the bridge. Three commands, each validating its input, and nothing that reads or changes anything on this machine.",
+  "webviews": ["site"],
+  "remote": {
+    "urls": ["https://x.com/*", "https://*.x.com/*", "https://twitter.com/*", "https://*.twitter.com/*"]
+  },
+  "permissions": ["allow-site-settings", "allow-site-navigated", "allow-site-profile"]
+}
