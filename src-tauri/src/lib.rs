@@ -190,19 +190,23 @@ fn remember_bounds(app: &AppHandle) {
     }
     let state = app.state::<AppState>();
     if let Ok(mut bounds) = state.bounds.lock() {
-        if maximized {
-            if let Some(current) = bounds.as_mut() {
-                current.maximized = true;
-            }
-        } else {
-            *bounds = Some(WindowBounds {
+        // A maximized window reports the screen's geometry, which is not what
+        // to restore to. Keep the last free-floating rectangle when there is
+        // one and only flip the flag; a window maximized before it was ever
+        // moved has nothing better to remember than what it reports now.
+        *bounds = match (*bounds, maximized) {
+            (Some(previous), true) => Some(WindowBounds {
+                maximized: true,
+                ..previous
+            }),
+            _ => Some(WindowBounds {
                 x: position.x,
                 y: position.y,
                 width: size.width,
                 height: size.height,
-                maximized: false,
-            });
-        }
+                maximized,
+            }),
+        };
     }
 }
 
