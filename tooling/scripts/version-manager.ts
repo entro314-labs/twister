@@ -158,7 +158,7 @@ function write(from: string, to: string, dryRun: boolean): void {
  * the tag's version has to match the version baked into the binaries, or the updater compares the
  * wrong two numbers.
  */
-export function setVersion(explicit: string, dryRun = false): { from: string; to: string } {
+function setVersion(explicit: string, dryRun = false): { from: string; to: string } {
   if (!FULL_SEMVER_RE.test(explicit)) throw new Error(`Not a semver version: ${explicit}`)
   const from = readCurrentVersion()
   write(from, explicit, dryRun)
@@ -166,7 +166,7 @@ export function setVersion(explicit: string, dryRun = false): { from: string; to
 }
 
 /** Bump one part of the version across every file. */
-export function incrementVersion(part: VersionPart = 'patch', dryRun = false) {
+function incrementVersion(part: VersionPart = 'patch', dryRun = false) {
   const from = readCurrentVersion()
   const to = bumpVersion(from, part)
   write(from, to, dryRun)

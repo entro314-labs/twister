@@ -240,4 +240,6 @@ posts X loaded into your tabs, kept only when *Remember what X loads* is on and
 cleared from Settings. Your X session is a cookie in the site view's own store,
 which Twister never reads. Sign out in Settings clears that store. The shell's
 content-security policy allows no outbound connections; the only thing that
-talks to X is X.
+talks to X is X. The one call Twister itself makes is the update check — to
+github.com, once on launch unless you turn *Check on launch* off, and whenever
+you ask. It sends nothing but the request.

@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { getVersion } from '@tauri-apps/api/app'
 import * as React from 'react'
@@ -26,6 +27,7 @@ import {
   useUpdateState,
   useUserAssets,
 } from '@/lib/query'
+import { queryKeys } from '@/lib/query/keys'
 import { humanMessage } from '@/lib/tauri/client'
 import type { Niceties, Settings, UpdateChannel } from '@/lib/tauri/types'
 import { describeUpdateFailure, formatUpdateSize, updateProgressPercent } from '@/lib/update'
@@ -726,6 +728,7 @@ function UpdatesSection({
   settings: Settings
   patch: (change: Partial<Settings>) => void
 }) {
+  const client = useQueryClient()
   const state = useUpdateState()
   const check = useUpdateCheck()
   const stage = useStageUpdate()
@@ -855,6 +858,9 @@ function UpdatesSection({
         <Select
           value={settings.updateChannel}
           onChange={(event) => {
+            // The answer belonged to the old channel: leaving it on screen would offer a
+            // Download that then re-resolves against the new one and refuses itself.
+            client.removeQueries({ queryKey: queryKeys.update.check() })
             patch({ updateChannel: event.target.value as UpdateChannel })
           }}
         >
