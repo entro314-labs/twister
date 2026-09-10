@@ -71,6 +71,17 @@ All notable changes to Twister are documented here. The format follows
   longer sells to individuals (likes, follows, quote posts, since April 2026).
   The Write panel says what each thread would have cost, a link counted at
   its own rate.
+- **Updates.** Twister checks a release channel for a newer build, downloads
+  and verifies it against its minisign signature while it runs, and installs
+  it when you quit — replacing the bundle of a live process is what breaks a
+  signed app, so nothing on disk changes until then. *Restart now*, in
+  Settings or in the status bar, is the same install brought forward. The
+  channel follows the build you are running by default — an alpha build
+  watches alpha — and can be pinned to stable, beta or alpha; one quiet check
+  runs on launch unless you turn it off, and what it finds is offered, never
+  installed. *Check for Updates…* sits in the Twister menu. A channel with no
+  release yet reads as exactly that, and is told apart from a releases page
+  that is not answering at all.
 
 ### Fixed
 

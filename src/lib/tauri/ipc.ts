@@ -37,6 +37,10 @@ export const IPC_COMMANDS = {
   listScheduledPosts: 'list_scheduled_posts',
   deleteScheduledPost: 'delete_scheduled_post',
   openDownloadsDir: 'open_downloads_dir',
+  updateState: 'update_state',
+  checkForUpdate: 'check_for_update',
+  stageUpdate: 'stage_update',
+  restartAndInstall: 'restart_and_install',
 } as const
 
 export const IPC_EVENTS = {
@@ -50,6 +54,8 @@ export const IPC_EVENTS = {
   op: 'twister://op',
   /** The schedule changed. No payload. */
   schedule: 'twister://schedule',
+  /** An update is downloading. Payload: `UpdateProgress`. */
+  updateProgress: 'twister://update-progress',
 } as const
 
 type ValueOf<T> = T[keyof T]

@@ -23,6 +23,7 @@ pub enum ShellAction {
     OpenPeople,
     OpenPosts,
     OpenCompose,
+    CheckForUpdate,
 }
 
 const NAV: &[(&str, &str, &str, Destination)] = &[
@@ -72,6 +73,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
     let app_menu = SubmenuBuilder::new(app, "Twister")
         .about(Some(about))
+        .separator()
+        .item(&MenuItemBuilder::with_id("shell:update", "Check for Updates…").build(app)?)
         .separator()
         .item(
             &MenuItemBuilder::with_id("shell:settings", "Settings…")
@@ -211,6 +214,7 @@ pub fn handle(app: &AppHandle, event: MenuEvent) {
         "shell:people" => emit_shell(app, ShellAction::OpenPeople),
         "shell:posts" => emit_shell(app, ShellAction::OpenPosts),
         "shell:compose" => emit_shell(app, ShellAction::OpenCompose),
+        "shell:update" => emit_shell(app, ShellAction::CheckForUpdate),
         _ => match NAV.iter().find(|(nav_id, ..)| *nav_id == id) {
             Some((_, _, _, destination)) => site::go(app, *destination),
             None => return,

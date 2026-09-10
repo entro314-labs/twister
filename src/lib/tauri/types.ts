@@ -44,6 +44,41 @@ export interface Settings {
   font: string
   /** The size of a post's text. */
   textSize: 'small' | 'normal' | 'large'
+  /** Which release channel to poll. `auto` follows this build's own tag. */
+  updateChannel: UpdateChannel
+  /** Look for a newer version once on launch. Found is offered, never installed. */
+  autoCheckUpdates: boolean
+}
+
+/** `settings::Settings::update_channel` */
+export type UpdateChannel = 'auto' | 'stable' | 'beta' | 'alpha'
+
+/** `commands::UpdateState` — what the update surfaces need before a check. */
+export interface UpdateState {
+  /** The running build, as `tauri.conf.json` declares it. */
+  version: string
+  /** Whether the in-app updater can replace this install at all. */
+  support: 'supported' | 'packageManager'
+  /** Whether a verified bundle is already waiting for the next quit. */
+  staged: boolean
+}
+
+/** `update::UpdateMeta` — a newer build, as its channel manifest describes it. */
+export interface UpdateMeta {
+  version: string
+  /** The release notes: the tag's CHANGELOG section. */
+  notes: string | null
+  date: string | null
+  /** The channel that answered — the resolved one, never `auto`. */
+  channel: Exclude<UpdateChannel, 'auto'>
+  /** This platform's bundle size, when the manifest carries it. */
+  downloadSize: number | null
+}
+
+/** Payload of `twister://update-progress`. `total` is null with no Content-Length. */
+export interface UpdateProgress {
+  downloaded: number
+  total: number | null
 }
 
 /** `site::Section` — where on X a tab currently is. */
@@ -110,6 +145,7 @@ export type ShellAction =
   | 'openPeople'
   | 'openPosts'
   | 'openCompose'
+  | 'checkForUpdate'
 
 /** `userland::UserAsset` — one file in the scripts or styles folder. */
 export interface UserAsset {

@@ -13,9 +13,16 @@ export const queryClient = new QueryClient({
       gcTime: 5 * 60_000,
       retry: (failureCount, error) => {
         // These are the codes nothing fixes by trying again: a rejected input,
-        // a webview that is gone. Retrying only delays the message.
+        // a webview that is gone, a channel with no release, a releases
+        // repository that is not answering. Retrying only delays the message —
+        // the update surfaces offer the user their own Retry instead.
         const code = errorCode(error)
-        if (code === 'NOT_FOUND' || code === 'INVALID_INPUT') {
+        if (
+          code === 'NOT_FOUND' ||
+          code === 'INVALID_INPUT' ||
+          code === 'NO_RELEASE' ||
+          code === 'UPDATE_SOURCE_UNREACHABLE'
+        ) {
           return false
         }
         return failureCount < 2

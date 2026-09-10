@@ -1,6 +1,12 @@
 import * as React from 'react'
 
-import { useActiveTab, useCancelOp, useOps } from '@/lib/query'
+import {
+  useActiveTab,
+  useCancelOp,
+  useOps,
+  useRestartAndInstall,
+  useUpdateState,
+} from '@/lib/query'
 import { subscribeEvent } from '@/lib/tauri/client'
 import { IPC_EVENTS } from '@/lib/tauri/ipc'
 import type { Notice, OpKind, Section } from '@/lib/tauri/types'
@@ -35,6 +41,8 @@ export function StatusBar() {
   const ops = useOps()
   const cancel = useCancelOp()
   const notice = useNotice()
+  const update = useUpdateState()
+  const restart = useRestartAndInstall()
 
   const path = pathOf(tab?.url)
   const running = ops.data?.running ?? null
@@ -55,6 +63,25 @@ export function StatusBar() {
 
       {tab && tab.unread > 0 ? (
         <span className="shrink-0 tabular-nums">{tab.unread} unread</span>
+      ) : null}
+
+      {/* A staged update is the one thing the footer has to keep saying: it is downloaded and
+          verified, and it lands on the next quit whether or not anyone comes back to Settings. */}
+      {update.data?.staged ? (
+        <span className="flex shrink-0 items-center gap-1.5 text-foreground/80">
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
+          <span>Update ready</span>
+          <button
+            type="button"
+            disabled={restart.isPending}
+            onClick={() => {
+              restart.mutate()
+            }}
+            className="rounded-sm px-1 text-primary hover:bg-primary/10 disabled:opacity-50"
+          >
+            {restart.isPending ? 'Restarting…' : 'Restart'}
+          </button>
+        </span>
       ) : null}
 
       {running ? (

@@ -14,15 +14,22 @@ import {
   useOpenDownloadsDir,
   useOpenUserAssetsDir,
   useReloadSite,
+  useRestartAndInstall,
   useSettings,
   useSignOut,
   useSiteState,
+  useStageUpdate,
   useStoreCounts,
+  useUpdateCheck,
+  useUpdateProgress,
   useUpdateSettings,
+  useUpdateState,
   useUserAssets,
 } from '@/lib/query'
 import { humanMessage } from '@/lib/tauri/client'
-import type { Niceties, Settings } from '@/lib/tauri/types'
+import type { Niceties, Settings, UpdateChannel } from '@/lib/tauri/types'
+import { describeUpdateFailure, formatUpdateSize, updateProgressPercent } from '@/lib/update'
+import { cn } from '@/lib/utils'
 
 export const Route = createFileRoute('/settings')({ component: SettingsScreen })
 
@@ -321,6 +328,8 @@ function SettingsScreen() {
       <StoreSection />
 
       <AccountSection />
+
+      <UpdatesSection settings={current} patch={patch} />
 
       <Section title="Shortcuts" note="These work whichever part of the window has focus.">
         {SHORTCUTS.map((shortcut) => (
@@ -691,6 +700,183 @@ function AboutSection() {
         outside in your browser, and hides what you ask it to. Nothing you read or write passes
         through Twister.
       </p>
+    </Section>
+  )
+}
+
+/**
+ * Updates. A found build is downloaded and verified while Twister runs and installed on quit —
+ * replacing the bundle of a live process is what breaks a signed app, so nothing on disk changes
+ * until the app is closing. "Restart now" is the same install, brought forward.
+ *
+ * The check itself is one shared query (`useUpdateCheck`), so this screen, the menu item and the
+ * launch check all read the same answer and the same failure.
+ */
+const CHANNELS: Array<{ value: UpdateChannel; label: string }> = [
+  { value: 'auto', label: 'Match this build' },
+  { value: 'stable', label: 'Stable' },
+  { value: 'beta', label: 'Beta' },
+  { value: 'alpha', label: 'Alpha' },
+]
+
+function UpdatesSection({
+  settings,
+  patch,
+}: {
+  settings: Settings
+  patch: (change: Partial<Settings>) => void
+}) {
+  const state = useUpdateState()
+  const check = useUpdateCheck()
+  const stage = useStageUpdate()
+  const restart = useRestartAndInstall()
+  const progress = useUpdateProgress()
+
+  const staged = state.data?.staged ?? false
+  const found = check.data ?? null
+  const percent = updateProgressPercent(progress ?? undefined)
+  const size = formatUpdateSize(found?.downloadSize)
+  const failure = check.error
+    ? describeUpdateFailure(check.error)
+    : stage.error
+      ? describeUpdateFailure(stage.error)
+      : restart.error
+        ? describeUpdateFailure(restart.error)
+        : null
+
+  if (state.data?.support === 'packageManager') {
+    return (
+      <Section title="Updates">
+        <p className="px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+          This copy of Twister was installed by a package manager, which is what updates it. The
+          in-app updater only replaces AppImage, macOS and Windows installs.
+        </p>
+      </Section>
+    )
+  }
+
+  return (
+    <Section
+      title="Updates"
+      note="A new version is downloaded and checked against its signature while Twister runs, and installed when you quit. Nothing on disk changes before that."
+    >
+      <Row
+        label={staged ? 'Ready to install' : 'Check for updates'}
+        hint={
+          staged
+            ? 'Downloaded and verified. It takes effect the next time Twister quits — or now.'
+            : found
+              ? `Version ${found.version} is out${size ? ` · ${size}` : ''}.`
+              : check.isFetched && !check.isFetching && !failure
+                ? 'You are on the latest version.'
+                : 'Asks the releases page whether a newer build has been published.'
+        }
+      >
+        {staged ? (
+          <Button
+            size="sm"
+            disabled={restart.isPending}
+            onClick={() => {
+              restart.mutate()
+            }}
+          >
+            {restart.isPending ? 'Restarting…' : 'Restart now'}
+          </Button>
+        ) : found ? (
+          <Button
+            size="sm"
+            disabled={stage.isPending}
+            onClick={() => {
+              stage.mutate()
+            }}
+          >
+            {stage.isPending ? 'Downloading…' : size ? `Download ${size}` : 'Download'}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={check.isFetching}
+            onClick={() => {
+              void check.refetch()
+            }}
+          >
+            {check.isFetching ? 'Checking…' : 'Check now'}
+          </Button>
+        )}
+      </Row>
+
+      {stage.isPending ? (
+        <div className="space-y-1.5 px-3 py-2.5" role="status" aria-live="polite">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>Downloading</span>
+            {percent === null ? null : <span className="tabular-nums">{percent}%</span>}
+          </div>
+          {/* A server that sent no Content-Length gets a pulsing full bar rather than one
+              frozen at zero. */}
+          <div
+            className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+            aria-label="Update download"
+            aria-valuemin={0}
+            {...(percent === null ? {} : { 'aria-valuemax': 100, 'aria-valuenow': percent })}
+          >
+            <div
+              className={cn('h-full bg-primary', percent === null && 'animate-pulse')}
+              style={{ width: percent === null ? '100%' : `${percent}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {found?.notes && !staged ? (
+        <p className="max-h-48 overflow-y-auto px-3 py-2.5 text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+          {found.notes}
+        </p>
+      ) : null}
+
+      {failure ? (
+        <div
+          role="alert"
+          className={cn(
+            'px-3 py-2.5 text-xs leading-relaxed',
+            failure.calm ? 'text-muted-foreground' : 'text-destructive',
+          )}
+        >
+          <span className="block font-medium">{failure.title}</span>
+          <span className="block">{failure.detail}</span>
+        </div>
+      ) : null}
+
+      <Row
+        label="Channel"
+        hint="Match this build follows the version you are running — an alpha build watches alpha. Choose one to pin it."
+      >
+        <Select
+          value={settings.updateChannel}
+          onChange={(event) => {
+            patch({ updateChannel: event.target.value as UpdateChannel })
+          }}
+        >
+          {CHANNELS.map((channel) => (
+            <option key={channel.value} value={channel.value}>
+              {channel.label}
+            </option>
+          ))}
+        </Select>
+      </Row>
+
+      <Row
+        label="Check on launch"
+        hint="Looks once, quietly, when Twister starts. What it finds is offered here — never installed on its own."
+      >
+        <Switch
+          checked={settings.autoCheckUpdates}
+          onCheckedChange={(checked) => {
+            patch({ autoCheckUpdates: checked })
+          }}
+        />
+      </Row>
     </Section>
   )
 }

@@ -28,4 +28,11 @@ export const queryKeys = {
     root: ['schedule'] as const,
     list: () => [...queryKeys.schedule.root, 'list'] as const,
   },
+  update: {
+    root: ['update'] as const,
+    state: () => [...queryKeys.update.root, 'state'] as const,
+    check: () => [...queryKeys.update.root, 'check'] as const,
+    /** Live download bytes, written by the event bridge; absent when idle. */
+    progress: () => [...queryKeys.update.root, 'progress'] as const,
+  },
 } as const

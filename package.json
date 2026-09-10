@@ -23,6 +23,10 @@
     "fmt:rust:check": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "check": "pnpm lint && pnpm fmt:check && pnpm check:frontend && pnpm fmt:rust:check && pnpm lint:rust && pnpm test:rust",
+    "release": "npx @entro314labs/release-kit@2.9.1",
+    "version:current": "node tooling/scripts/version-manager.ts current",
+    "version:bump": "node tooling/scripts/version-manager.ts increment",
+    "version:set": "node tooling/scripts/version-manager.ts set",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"

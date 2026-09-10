@@ -26,6 +26,12 @@ pub struct Settings {
     pub font: String,
     /// `small` | `normal` | `large` — the size of a post's text.
     pub text_size: String,
+    /// `auto` | `stable` | `beta` | `alpha` — which release channel to poll.
+    /// `auto` follows the running build's own prerelease tag (`update::Channel`).
+    pub update_channel: String,
+    /// Look for a newer version once on launch. What it finds is offered, never
+    /// installed: an update only lands when it is asked for.
+    pub auto_check_updates: bool,
 }
 
 impl Default for Settings {
@@ -36,6 +42,8 @@ impl Default for Settings {
             niceties: Niceties::default(),
             font: String::new(),
             text_size: "normal".into(),
+            update_channel: "auto".into(),
+            auto_check_updates: true,
         }
     }
 }
@@ -85,6 +93,15 @@ impl Settings {
             return Err(AppError::InvalidInput(format!(
                 "Unknown text size `{}`.",
                 self.text_size
+            )));
+        }
+        if !matches!(
+            self.update_channel.as_str(),
+            "auto" | "stable" | "beta" | "alpha"
+        ) {
+            return Err(AppError::InvalidInput(format!(
+                "Unknown update channel `{}`.",
+                self.update_channel
             )));
         }
         Ok(())

@@ -212,6 +212,26 @@ pnpm check              # lint, format, types, build, clippy, rustfmt, rust test
 Requires Node 24+, Rust 1.98 and pnpm 12 — `mise install` picks all three up
 from `mise.toml` and `rust-toolchain.toml`.
 
+### Releases
+
+`pnpm release` cuts one: release-kit writes the version across `package.json`,
+`tauri.conf.json`, `Cargo.toml` and `Cargo.lock` (`release.config.json`), rolls
+the changelog, tags and pushes; the tag runs `.github/workflows/release.yml`,
+which gates on `pnpm check` and then hands the build to
+[tauri-release-kit](https://github.com/entro314-labs/tauri-release-kit).
+`pnpm version:set X.Y.Z` and `pnpm version:bump` write the same four files
+without cutting anything.
+
+Because the bundle now carries updater artifacts, a local `pnpm tauri:build`
+needs the minisign key in the environment:
+
+```sh
+export TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/twister.key)"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+```
+
+`pnpm check` does not build the bundle, so it is unaffected.
+
 ## Privacy
 
 Twister stores three small JSON files in your app data directory — preferences,

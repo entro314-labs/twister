@@ -14,7 +14,7 @@ import { StatusBar } from '@/components/shell/status-bar'
 import { TOOLS_PANEL_W } from '@/lib/chrome'
 import { pageVariants } from '@/lib/motion'
 import { PrefsProvider, usePrefs } from '@/lib/prefs'
-import { useSettings } from '@/lib/query'
+import { useSettings, useUpdateCheck, useUpdateState } from '@/lib/query'
 import { useSiteIsland } from '@/lib/site-island'
 import { invokeCommand, subscribeEvent } from '@/lib/tauri/client'
 import { IPC_COMMANDS, IPC_EVENTS } from '@/lib/tauri/ipc'
@@ -65,11 +65,37 @@ function RootShell() {
             it has to be told about the setting separately. */}
         <MotionConfig reducedMotion="user">
           <ShellActionListener />
+          <LaunchUpdateCheck />
           <ShellLayout />
         </MotionConfig>
       </PrefsProvider>
     </ThemeProvider>
   )
+}
+
+/**
+ * One quiet look for a newer version when Twister starts, if the setting allows it. It only ever
+ * fills the shared check query — Settings and the status bar show what it found; nothing installs
+ * itself. Skipped when a bundle is already staged, or when this install updates through a package
+ * manager instead.
+ */
+function LaunchUpdateCheck() {
+  const settings = useSettings()
+  const state = useUpdateState()
+  const check = useUpdateCheck()
+  const asked = React.useRef(false)
+
+  const allowed = settings.data?.autoCheckUpdates ?? false
+  const eligible = state.data?.support === 'supported' && !state.data.staged
+  const { refetch } = check
+
+  React.useEffect(() => {
+    if (asked.current || !allowed || !eligible) return
+    asked.current = true
+    void refetch()
+  }, [allowed, eligible, refetch])
+
+  return null
 }
 
 /**
@@ -81,6 +107,7 @@ function ShellActionListener() {
   const navigate = useNavigate()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const { sidebarMode, setSidebarMode } = usePrefs()
+  const { refetch: checkForUpdate } = useUpdateCheck()
 
   // A ref, so the one subscription sees current values without resubscribing.
   const latest = React.useRef({ pathname, sidebarMode })
@@ -106,13 +133,20 @@ function ShellActionListener() {
             void navigate({ to: latest.current.pathname === to ? '/' : to })
             break
           }
+          case 'checkForUpdate':
+            // Settings is where the whole flow lives — the answer, the notes, the
+            // download and the restart. Run the check on the way there rather than
+            // landing the user on a screen with a button they have to press again.
+            void navigate({ to: '/settings' })
+            void checkForUpdate()
+            break
         }
       })
     })()
     return () => {
       detach?.()
     }
-  }, [navigate, setSidebarMode])
+  }, [navigate, setSidebarMode, checkForUpdate])
   return null
 }
 

@@ -16,8 +16,15 @@
     "noFallthroughCasesInSwitch": true,
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+    // Explicit because `tooling/` is node code: without `node` here the release
+    // scripts' `process` and `node:*` imports resolve to nothing. `vite/client`
+    // is what src/vite-env.d.ts references.
+    "types": ["node", "vite/client"]
   },
-  "include": ["src"],
+  // `tooling` alongside `src`: the release scripts are run by plain node (Node 26 strips the
+  // types), and outside the project they would be neither type-checked nor resolvable by oxlint's
+  // type-aware rules, which would see every node global as `any`.
+  "include": ["src", "tooling"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

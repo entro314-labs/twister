@@ -20,6 +20,7 @@ mod scheduler;
 pub mod settings;
 mod site;
 mod tooltip;
+mod update;
 mod userland;
 mod windowing;
 
@@ -66,6 +67,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .menu(menu::build)
         .on_menu_event(menu::handle)
         .setup(setup)
@@ -126,6 +128,10 @@ pub fn run() {
             commands::list_scheduled_posts,
             commands::delete_scheduled_post,
             commands::open_downloads_dir,
+            commands::update_state,
+            commands::check_for_update,
+            commands::stage_update,
+            commands::restart_and_install,
             commands::tooltip_ready,
             commands::site_settings,
             commands::site_navigated,
@@ -142,7 +148,13 @@ pub fn run() {
             // single-instance handler never fires for it; this is the one
             // event that brings a hidden window back.
             RunEvent::Reopen { .. } => show_main_window(app),
-            RunEvent::ExitRequested { .. } => persist(app),
+            // The quit path, and the only one: closing the window hides it, so
+            // this fires on ⌘Q and Quit — precisely when no code is running out
+            // of the bundle a staged update replaces.
+            RunEvent::ExitRequested { .. } => {
+                persist(app);
+                update::install_pending_on_exit(app);
+            }
             _ => {}
         });
 }
@@ -169,6 +181,7 @@ fn setup(app: &mut tauri::App) -> std::result::Result<(), Box<dyn std::error::Er
         store,
     });
     app.manage(tooltip::Tooltip::default());
+    app.manage(update::PendingUpdate::default());
 
     let window = build_window(app, saved)?;
     // Before the material and before any child webview: the style-mask and

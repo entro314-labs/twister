@@ -19,6 +19,9 @@ import type {
   SiteState,
   StoreCounts,
   TabState,
+  UpdateMeta,
+  UpdateProgress,
+  UpdateState,
   UserAssets,
 } from '@/lib/tauri/types'
 
@@ -273,5 +276,71 @@ export function useDeleteScheduledPost() {
 export function useOpenDownloadsDir() {
   return useMutation({
     mutationFn: async () => invokeCommand<Nothing>(IPC_COMMANDS.openDownloadsDir),
+  })
+}
+
+// ─── Updates ────────────────────────────────────────────────────────────────
+
+/** Which version is running, whether it can self-update, and whether one is already staged. */
+export function useUpdateState() {
+  return useQuery({
+    queryKey: queryKeys.update.state(),
+    queryFn: async () => invokeCommand<UpdateState>(IPC_COMMANDS.updateState),
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+}
+
+/**
+ * The last check's answer — a newer build, or `null` for "nothing newer". Never runs on mount: a
+ * check reaches the network, so it only ever happens because something asked. Settings, the menu
+ * item and the launch check all `refetch()` this one query, so all three read the same answer and
+ * the same failure.
+ */
+export function useUpdateCheck() {
+  return useQuery({
+    queryKey: queryKeys.update.check(),
+    queryFn: async () => invokeCommand<UpdateMeta | null>(IPC_COMMANDS.checkForUpdate),
+    enabled: false,
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  })
+}
+
+/** Live download bytes, written by the event bridge; undefined when nothing is downloading. */
+export function useUpdateProgress() {
+  return useQuery({
+    queryKey: queryKeys.update.progress(),
+    queryFn: (): UpdateProgress | null => null,
+    enabled: false,
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: Number.POSITIVE_INFINITY,
+  }).data
+}
+
+/** Download and verify the update, and hold it for the next quit. Nothing is replaced until then. */
+export function useStageUpdate() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async () => invokeCommand<UpdateMeta>(IPC_COMMANDS.stageUpdate),
+    onMutate: () => {
+      // A previous download's last frame must not be the first thing this one shows.
+      client.setQueryData(queryKeys.update.progress(), null)
+    },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.update.state() })
+    },
+  })
+}
+
+/** Install the staged bundle now and relaunch into it. On success nothing here runs again. */
+export function useRestartAndInstall() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async () => invokeCommand<Nothing>(IPC_COMMANDS.restartAndInstall),
+    onError: () => {
+      // A failed install leaves the bundle staged for a retry — re-read that.
+      void client.invalidateQueries({ queryKey: queryKeys.update.state() })
+    },
   })
 }

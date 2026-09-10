@@ -41,6 +41,10 @@ fn main() {
             "list_scheduled_posts",
             "delete_scheduled_post",
             "open_downloads_dir",
+            "update_state",
+            "check_for_update",
+            "stage_update",
+            "restart_and_install",
             // Tooltip window
             "tooltip_ready",
             // Bridge, callable from x.com

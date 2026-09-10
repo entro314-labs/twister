@@ -14,7 +14,7 @@ use crate::settings::{Settings, SitePrefs, Store, WindowBounds};
 use crate::site::{self, Action, Destination, Insets, Site, SiteState};
 use crate::tooltip::{self, Anchor, Content};
 use crate::userland::{self, UserAssets};
-use crate::{capture, compose, download, export, ops, scheduler};
+use crate::{capture, compose, download, export, ops, scheduler, update};
 
 pub struct AppState {
     pub store: Store,
@@ -129,6 +129,69 @@ pub fn show_tooltip(app: AppHandle, anchor: Anchor, content: Content) -> Result<
 #[tauri::command]
 pub fn hide_tooltip(app: AppHandle) -> Result<()> {
     tooltip::hide(&app)
+}
+
+// ─── Updates ────────────────────────────────────────────────────────────────
+
+/// The channel this install polls right now: the preference, with `auto`
+/// resolved against the running build's own tag. Read and dropped before any
+/// await — a settings guard must not be held across one.
+fn update_channel(app: &AppHandle, state: &State<'_, AppState>) -> Result<update::Channel> {
+    let pref = state
+        .settings
+        .lock()
+        .map(|settings| settings.update_channel.clone())
+        .map_err(|_| poisoned())?;
+    Ok(update::channel_for(app, &pref))
+}
+
+/// Whether the in-app updater can service this install at all, and whether a
+/// bundle is already staged for the next quit. One command because the UI needs
+/// both before it can draw anything.
+#[tauri::command]
+pub fn update_state(app: AppHandle) -> UpdateState {
+    UpdateState {
+        version: app.package_info().version.to_string(),
+        support: update::install_support(),
+        staged: update::staged(&app),
+    }
+}
+
+/// What the update surfaces need before a check: which version is running,
+/// whether this install can self-update, and whether one is already staged.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateState {
+    pub version: String,
+    pub support: update::InstallSupport,
+    pub staged: bool,
+}
+
+/// Is a newer build published on the channel this install polls?
+#[tauri::command]
+pub async fn check_for_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<update::UpdateMeta>> {
+    let channel = update_channel(&app, &state)?;
+    update::check_for_update(app, channel).await
+}
+
+/// Download and verify the update, then hold it for the next quit. Nothing is
+/// replaced on disk until then.
+#[tauri::command]
+pub async fn stage_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<update::UpdateMeta> {
+    let channel = update_channel(&app, &state)?;
+    update::stage_update(app, channel).await
+}
+
+/// Install the staged bundle now and relaunch into it.
+#[tauri::command]
+pub fn restart_and_install(app: AppHandle) -> Result<()> {
+    update::restart_and_install(&app)
 }
 
 // ─── Tabs ───────────────────────────────────────────────────────────────────

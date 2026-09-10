@@ -47,6 +47,10 @@
     "allow-schedule-post",
     "allow-list-scheduled-posts",
     "allow-delete-scheduled-post",
-    "allow-open-downloads-dir"
+    "allow-open-downloads-dir",
+    "allow-update-state",
+    "allow-check-for-update",
+    "allow-stage-update",
+    "allow-restart-and-install"
   ]
 }

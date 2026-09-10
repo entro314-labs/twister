@@ -1,6 +1,6 @@
 [package]
 name = "twister"
-version = "1.0.0"
+version = "0.1.0"
 description = "Twister - a desktop client for X with niceties injected"
 authors = ["entro314-labs"]
 license = "MIT"
@@ -35,6 +35,10 @@ tauri-plugin-single-instance = "2"
 
 # Save dialogs for exports.
 tauri-plugin-dialog = "2"
+
+# Deferred, channel-aware auto-updates: the bundle is downloaded and verified
+# while the app runs and installed on quit. See src/update.rs.
+tauri-plugin-updater = "2"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

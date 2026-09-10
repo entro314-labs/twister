@@ -2,15 +2,15 @@ import type { QueryClient } from '@tanstack/react-query'
 
 import { subscribeEvent } from '@/lib/tauri/client'
 import { IPC_EVENTS } from '@/lib/tauri/ipc'
-import type { Job, OpsState, SiteState } from '@/lib/tauri/types'
+import type { Job, OpsState, SiteState, UpdateProgress } from '@/lib/tauri/types'
 
 import { queryKeys } from './keys'
 
 /**
  * Bridges Rust's pushes onto the query cache. The site state changes when x.com does — a
  * navigation, a new title, an unread count — so it is written straight into the cache rather than
- * refetched: the payload IS the answer. The running operation arrives the same way; the schedule
- * only says it changed, and the list is refetched.
+ * refetched: the payload IS the answer. The running operation arrives the same way, as does an
+ * update's download progress; the schedule only says it changed, and the list is refetched.
  *
  * Returns a detach function; the caller owns the lifetime.
  */
@@ -34,6 +34,11 @@ export async function attachEventBridge(client: QueryClient): Promise<() => void
     }),
     subscribeEvent<null>(IPC_EVENTS.schedule, () => {
       void client.invalidateQueries({ queryKey: queryKeys.schedule.root })
+    }),
+    subscribeEvent<UpdateProgress>(IPC_EVENTS.updateProgress, (progress) => {
+      // Held in the cache rather than in the screen that started the download:
+      // Settings and the status bar both read it, and neither can be the owner.
+      client.setQueryData(queryKeys.update.progress(), progress)
     }),
   ])
   return () => {

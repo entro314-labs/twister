@@ -1,0 +1,132 @@
+# Thin caller for the shared Tauri release pipeline (tauri-release-kit) —
+# meltemi's and anasa's model: the full build → sign → manifest → verify →
+# publish pipeline lives in entro314-labs/tauri-release-kit, so a fix lands
+# there once and every app picks it up.
+#
+# Required secrets:
+#   TAURI_SIGNING_PRIVATE_KEY  — the ~/.tauri/twister.key minisign key, whose
+#                                public half is in src-tauri/tauri.conf.json.
+#                                Without it the build produces no signed
+#                                updater artifacts and the updater has nothing
+#                                to verify against.
+#   RELEASES_TOKEN             — write access to entro314-labs/twister-releases,
+#                                the PUBLIC repo the updater endpoints in
+#                                src-tauri/src/update.rs point at.
+#
+# The releases repo has to exist before the first tag: the in-app updater polls
+# it for every channel, and the reachability probe in update.rs reports it as
+# unreachable — loudly, and correctly — until it does.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0 — plain semver, single channel)'
+        required: true
+        type: string
+      build_targets:
+        description: >-
+          Retry lever: only build these legs (comma-separated updater keys,
+          e.g. "windows-x86_64,linux-aarch64"). Empty = all. After a partially
+          failed release, re-dispatch with the SAME tag and just the failed
+          legs — the run reuses the existing draft, so the successful legs'
+          assets are kept and only the failed legs cost runner minutes again.
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Release gate. The kit's own pipeline runs only `cargo fmt` and `cargo
+  # clippy`, so without this job a tag on a commit that is not the tip of a
+  # green branch would publish signed, auto-updating binaries that never saw
+  # tsc, oxlint, oxfmt or cargo test. `release` needs this job, so a red gate
+  # stops the release before any asset exists.
+  preflight:
+    name: Preflight gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux system dependencies
+        # clippy and cargo test compile the tauri crate, which links
+        # webkit2gtk/soup/gtk.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            librsvg2-dev
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup Rust
+        # No explicit toolchain input: rustup resolves rust-toolchain.toml (the
+        # single source of the pin) when cargo runs inside the repo.
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Full check (oxlint, oxfmt, tsc, vite build, cargo fmt + clippy + test)
+        run: pnpm check
+
+      - name: Validate Tauri capabilities/permissions load
+        # `tauri permission ls` parses tauri.conf.json + every capability file;
+        # a malformed capability fails here instead of mid-release-build.
+        run: pnpm tauri permission ls > /dev/null
+
+  release:
+    needs: preflight
+    # Pinned to a reviewed commit, NOT @main: this workflow runs with
+    # `contents: write` and the RELEASES_TOKEN secret, so a mutable external ref
+    # would let any push to the kit's default branch publish releases here. Bump
+    # deliberately, after reading the diff.
+    # 95a417e = kit tip 2026-09-08.
+    uses: entro314-labs/tauri-release-kit/.github/workflows/release.yml@95a417eb6fabbb19f1dc4777537110f34a7873ec
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      app_display_name: 'Twister'
+      project_path: '.'
+      cargo_package: 'twister'
+      node_version: '26'
+      tag: ${{ inputs.tag || '' }}
+      build_targets: ${{ inputs.build_targets || '' }}
+      # deb + AppImage. The AppImage is the only Linux artifact the in-app
+      # updater can replace (see update::install_support); the deb is what a
+      # package manager owns.
+      linux_bundles: 'deb,appimage'
+      # release-kit writes the version BEFORE tagging (release.config.json), so
+      # the kit's post-release patch-bump PR would be a second writer.
+      post_release_bump: false
+      # Releases and the rolling per-channel updater manifests live on the
+      # public mirror; tauri.conf.json's endpoint and update.rs both point
+      # there. Requires the RELEASES_TOKEN secret.
+      releases_repo: 'entro314-labs/twister-releases'
+      # Case-sensitive: this is the bundled asset filename stem
+      # (Twister_<version>_aarch64.dmg) and the .app name, so it must match
+      # tauri.conf.json's productName exactly.
+      product_name: 'Twister'
+      bundle_identifier: 'com.entro314.twister'
+    secrets: inherit

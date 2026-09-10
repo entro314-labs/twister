@@ -1,8 +1,9 @@
 //! One error type for every Tauri command.
 //!
 //! Serializes as `"[CODE] message"`. The code half is a contract with the
-//! renderer: `lib/query/client.ts` refuses to retry `INVALID_INPUT` and
-//! `NOT_FOUND`, because neither fixes itself.
+//! renderer: `lib/query/client.ts` refuses to retry `INVALID_INPUT`,
+//! `NOT_FOUND`, `NO_RELEASE` and `UPDATE_SOURCE_UNREACHABLE`, because none of
+//! them fixes itself within a couple of seconds of backoff.
 
 use std::fmt;
 
@@ -17,6 +18,14 @@ pub enum AppError {
     /// Ours: a broken settings file, a webview that refused an instruction.
     #[error("[INTERNAL] {0}")]
     Internal(String),
+    /// The update channel has no published release yet. Not a failure: the
+    /// calm state every channel is in before its first release ships.
+    #[error("[NO_RELEASE] {0}")]
+    NoRelease(String),
+    /// The releases repository itself did not answer — the update pipeline is
+    /// broken, missing or blocked, which is emphatically not [`Self::NoRelease`].
+    #[error("[UPDATE_SOURCE_UNREACHABLE] {0}")]
+    UpdateSourceUnreachable(String),
 }
 
 impl serde::Serialize for AppError {
@@ -37,6 +46,12 @@ impl From<tauri::Error> for AppError {
 impl From<serde_json::Error> for AppError {
     fn from(err: serde_json::Error) -> Self {
         Self::Internal(format!("Malformed JSON: {err}"))
+    }
+}
+
+impl From<tauri_plugin_updater::Error> for AppError {
+    fn from(err: tauri_plugin_updater::Error) -> Self {
+        Self::Internal(format!("Update error: {err}"))
     }
 }
 
