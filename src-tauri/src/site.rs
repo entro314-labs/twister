@@ -133,11 +133,14 @@ pub struct Insets {
 
 impl Default for Insets {
     /// Matches the shell's default layout so the first frame is right before
-    /// the shell has measured anything.
+    /// the shell has measured anything. Mirrors `chrome.ts`: the sidebar's
+    /// default width, then BOTH top bands — the titlebar the traffic lights
+    /// ride in (`TITLEBAR_H`, 52) plus the tab strip under it (`TABBAR_H`, 36)
+    /// — and the status bar along the bottom.
     fn default() -> Self {
         Self {
             left: 236.0,
-            top: 52.0,
+            top: 88.0,
             right: 0.0,
             bottom: 24.0,
         }
@@ -1174,15 +1177,15 @@ mod tests {
     fn bounds_fill_the_window_inside_the_insets_and_never_go_negative() {
         let insets = Insets {
             left: 236.0,
-            top: 52.0,
+            top: 88.0,
             right: 0.0,
             bottom: 24.0,
         };
         let (position, size) = bounds_for(insets, LogicalSize::new(1240.0, 820.0));
         assert!((position.x - 236.0).abs() < f64::EPSILON);
-        assert!((position.y - 52.0).abs() < f64::EPSILON);
+        assert!((position.y - 88.0).abs() < f64::EPSILON);
         assert!((size.width - 1004.0).abs() < f64::EPSILON);
-        assert!((size.height - 744.0).abs() < f64::EPSILON);
+        assert!((size.height - 708.0).abs() < f64::EPSILON);
 
         let (_, tiny) = bounds_for(insets, LogicalSize::new(100.0, 50.0));
         assert!((tiny.width - 1.0).abs() < f64::EPSILON);
