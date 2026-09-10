@@ -146,7 +146,11 @@ pub fn run() {
         .run(|app, event| match event {
             // Clicking the Dock icon does not start a second process, so the
             // single-instance handler never fires for it; this is the one
-            // event that brings a hidden window back.
+            // event that brings a hidden window back. There is no Dock off
+            // macOS and no `Reopen` variant either, so the arm itself has to
+            // go — a `#[cfg]` at the use site is the only form that compiles
+            // on a platform where the variant does not exist.
+            #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => show_main_window(app),
             // The quit path, and the only one: closing the window hides it, so
             // this fires on ⌘Q and Quit — precisely when no code is running out
