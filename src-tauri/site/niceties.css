@@ -10,8 +10,11 @@
  */
 
 /* Promoted posts sit inside a placement-tracking wrapper in every timeline;
-   the bridge marks the cell of anything else carrying X's promoted label. */
-html[data-twister-hide-promoted] [data-testid="placementTracking"],
+   the bridge marks the cell of anything else carrying X's promoted label.
+   X wraps every video player in the same wrapper, inside the post — so only
+   a wrapper that holds a post is an ad. Seen on x.com on 2026-09-10: the
+   old rule blanked every video. */
+html[data-twister-hide-promoted] [data-testid="placementTracking"]:has([data-testid="tweet"]),
 html[data-twister-hide-promoted] [data-twister-promoted] {
   display: none !important;
 }
