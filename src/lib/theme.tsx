@@ -88,6 +88,11 @@ export function ThemeProvider({
   }, [])
 
   React.useEffect(() => {
+    // The rule traces `setMaterialState` back to this call, but it is not the
+    // cascading render the warning is about: it runs after the IPC round trip
+    // has resolved, and asking the OS for a material — then recording what it
+    // actually gave back — is exactly the external system an effect is for.
+    // oxlint-disable-next-line react/set-state-in-effect
     void applyMaterial(requested)
   }, [requested, applyMaterial])
 
