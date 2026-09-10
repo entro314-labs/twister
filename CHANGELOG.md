@@ -60,7 +60,10 @@ All notable changes to Twister are documented here. The format follows
   in the timeline* — "Who to follow", "Discover more", news and premium
   blocks go on Home, profiles, lists and bookmarks, and under a post
   "Discover more" takes everything after it; *Time on the right* of the
-  byline, the dot before it gone.
+  byline, the dot before it gone, next to the caret; *Media as thumbnails* —
+  photos and videos in a timeline as a 180px strip, cropped to fit, full size
+  on the post's own page. A *System* button beside the font field sets the
+  OS's own face in one click.
 - **What the API would charge.** A table in Settings of what X's pay-per-use
   card bills for each thing a classic client did — timeline, threads,
   profiles, search, mentions, messages, posts, bookmarks — with an ordinary
@@ -68,6 +71,13 @@ All notable changes to Twister are documented here. The format follows
   longer sells to individuals (likes, follows, quote posts, since April 2026).
   The Write panel says what each thread would have cost, a link counted at
   its own rate.
+
+### Fixed
+
+- **Videos and GIFs were blank with *Hide promoted posts* on.** X wraps
+  every video player in the same placement-tracking box it wraps a promoted
+  post in, and the rule hid them all; only a box that holds a post is hidden
+  now. The label-based second net still catches ads without one.
 
 ### Changed
 

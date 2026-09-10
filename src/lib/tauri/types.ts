@@ -32,6 +32,7 @@ export interface Niceties {
   hidePageHeaders: boolean
   hideTimelineModules: boolean
   timeOnRight: boolean
+  mediaThumbnails: boolean
 }
 
 /** `settings::Settings` */

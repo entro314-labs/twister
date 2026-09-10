@@ -158,7 +158,15 @@ const LOOK: Array<{ key: keyof Niceties; label: string; hint: string }> = [
     label: 'Time on the right',
     hint: 'The post’s age sits at the far right of the byline, the dot before it gone. The post on its own page keeps X’s layout.',
   },
+  {
+    key: 'mediaThumbnails',
+    label: 'Media as thumbnails',
+    hint: 'Photos and videos in a timeline as a 180px strip, cropped to fit, the way a classic client showed them. The post on its own page keeps them full size.',
+  },
 ]
+
+/** The OS's own face — San Francisco on macOS, Segoe on Windows — as CSS names it. */
+const SYSTEM_FONT = 'system-ui'
 
 const SHORTCUTS: Array<{ keys: string; does: string }> = [
   {
@@ -247,14 +255,25 @@ function SettingsScreen() {
           label="Font on X"
           hint="A font family for X’s text, as CSS would name it — “Inter”, “Georgia, serif”. Empty keeps X’s own."
         >
-          <FontField
-            // Remounted when the stored value changes, so the draft starts from it.
-            key={current.font}
-            value={current.font}
-            onCommit={(font) => {
-              patch({ font })
-            }}
-          />
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="sm"
+              variant={current.font === SYSTEM_FONT ? 'default' : 'outline'}
+              onClick={() => {
+                patch({ font: current.font === SYSTEM_FONT ? '' : SYSTEM_FONT })
+              }}
+            >
+              System
+            </Button>
+            <FontField
+              // Remounted when the stored value changes, so the draft starts from it.
+              key={current.font}
+              value={current.font}
+              onCommit={(font) => {
+                patch({ font })
+              }}
+            />
+          </div>
         </Row>
         <Row label="Text size" hint="The size of a post’s text. Normal is X’s own.">
           <Select

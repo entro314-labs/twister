@@ -42,6 +42,7 @@
     hidePageHeaders: 'data-twister-hide-headers',
     hideTimelineModules: 'data-twister-hide-modules',
     timeOnRight: 'data-twister-time-right',
+    mediaThumbnails: 'data-twister-thumbs',
   }
 
   function installSheet(name, css) {

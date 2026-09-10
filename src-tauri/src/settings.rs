@@ -157,6 +157,8 @@ pub struct Niceties {
     pub hide_timeline_modules: bool,
     /// The time on the far right of the byline, the dot before it gone.
     pub time_on_right: bool,
+    /// Photos and videos in a timeline as a cropped strip, not full size.
+    pub media_thumbnails: bool,
 }
 
 impl Default for Niceties {
@@ -186,6 +188,7 @@ impl Default for Niceties {
             hide_page_headers: false,
             hide_timeline_modules: false,
             time_on_right: false,
+            media_thumbnails: false,
         }
     }
 }
@@ -330,6 +333,7 @@ mod tests {
         assert!(!parsed.niceties.hide_page_headers);
         assert!(!parsed.niceties.hide_timeline_modules);
         assert!(!parsed.niceties.time_on_right);
+        assert!(!parsed.niceties.media_thumbnails);
         assert_eq!(parsed.text_size, "normal");
         let parsed: Settings = serde_json::from_str(
             r#"{"textSize":"large","niceties":{"compactPosts":true,"starFavorites":true,"hideTimelineModules":true}}"#,

@@ -104,7 +104,10 @@ what each thread would have cost. The numbers live in `src/lib/api-costs.ts`.
   tabs or a search field elsewhere stay, and so does the new-posts pill);
   *Only posts in the timeline* (no "Who to follow", "Discover more", news or
   premium blocks on Home, profiles, lists and bookmarks; under a post,
-  "Discover more" and all after it); *Time on the right* of the byline.
+  "Discover more" and all after it); *Time on the right* of the byline;
+  *Media as thumbnails* (a 180px cropped strip in timelines, full size on
+  the post's page). A *System* button beside the font field sets the OS's
+  own face.
   - *Remember what X loads* and *Download button on posts*.
   - *Dim* — X's retired blue-grey dark theme, painted over Lights out. Built
     by reading X's own stylesheet for every rule that paints a Lights-out

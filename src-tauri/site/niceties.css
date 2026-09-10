@@ -301,20 +301,48 @@ html[data-twister-hide-modules] [data-twister-module] {
   display: none !important;
 }
 
-/* Time on the right: the byline's second half is handle, dot, time; the
-   half is stretched, the dot dropped, the time pushed to the far end. The
-   focal post lays its byline out differently and keeps X's. */
-html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"] {
+/* Time on the right: the byline is two halves, name and a wrapper holding
+   handle, dot, time, and X shrink-wraps the byline's two ancestors so the
+   caret sits right after it. The ancestors and both halves are stretched,
+   the dot dropped, the time pushed to the far end, next to the caret. The
+   focal post lays its byline out differently and keeps X's; so does the
+   byline of a quoted post, which lives inside a link. Structure read off
+   x.com on 2026-09-10. */
+html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) div:has(> [data-testid="User-Name"]):not(div[role="link"] *),
+html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) div:has(> div > [data-testid="User-Name"]):not(div[role="link"] *),
+html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"]:not(div[role="link"] *) {
   flex: 1 1 auto !important;
   min-width: 0 !important;
 }
-html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"] > div:last-child:not(:first-child) {
+html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"]:not(div[role="link"] *) > div:last-child:not(:first-child),
+html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"]:not(div[role="link"] *) > div:last-child:not(:first-child) > div {
+  display: flex !important;
   flex: 1 1 auto !important;
+  min-width: 0 !important;
 }
-html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"] > div:last-child:not(:first-child) > div:nth-child(2):not(:last-child) {
+html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"]:not(div[role="link"] *) > div:last-child:not(:first-child) > div > div:nth-child(2):not(:last-child) {
   display: none !important;
 }
-html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"] > div:last-child:not(:first-child) > div:last-child:not(:first-child) {
+html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"]:not(div[role="link"] *) > div:last-child:not(:first-child) > div > div:last-child:not(:first-child) {
   margin-left: auto !important;
   padding-left: 8px !important;
+  flex: 0 0 auto !important;
+}
+
+/* Media as thumbnails: in a timeline, a photo's frame is sized by an inline
+   width and height on the box inside its link, and a video's by inline
+   padding-bottom spacers; each is capped at a strip, and what is in it is
+   cropped to cover the strip. The focal post keeps its media full size.
+   Structure read off x.com on 2026-09-10. */
+html[data-twister-thumbs] article[data-testid="tweet"]:not([tabindex="-1"]) div:has(> div > [data-testid="tweetPhoto"]) {
+  max-height: 180px !important;
+}
+html[data-twister-thumbs] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="tweetPhoto"] [style*="padding-bottom"],
+html[data-twister-thumbs] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="videoPlayer"] [style*="padding-bottom"] {
+  padding-bottom: 0 !important;
+  height: 180px !important;
+}
+html[data-twister-thumbs] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="tweetPhoto"] img,
+html[data-twister-thumbs] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="videoPlayer"] video {
+  object-fit: cover !important;
 }
