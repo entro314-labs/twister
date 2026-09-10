@@ -5,9 +5,10 @@
 // changes without notice, and a broken nicety should be a one-file fix. Rust
 // substitutes the two __TWISTER_*__ placeholders before injection.
 //
-// The bridge can call exactly three commands — site_settings, site_navigated
-// and site_profile — and each validates what it is sent, because anything
-// running on this page could call them too.
+// The bridge calls four commands — site_settings, site_navigated,
+// site_profile and site_layout — and each validates what it is sent, because
+// anything running on this page could call them too. The capture hook and the
+// operations are separate scripts (capture.js, ops.js).
 (() => {
   'use strict'
   if (window.__twister) return
@@ -28,7 +29,9 @@
     hideViewCounts: 'data-twister-hide-view-counts',
     hideSiteNav: 'data-twister-hide-site-nav',
     hideDrawers: 'data-twister-hide-drawers',
-    classicBird: 'data-twister-classic-bird',
+    classicTwitter: 'data-twister-classic',
+    fitTimeline: 'data-twister-fit',
+    smoothScroll: 'data-twister-smooth',
   }
 
   function installSheet(name, css) {
@@ -50,6 +53,10 @@
     const root = document.documentElement
     if (!root) return
     for (const key of Object.keys(ATTRS)) root.toggleAttribute(ATTRS[key], Boolean(niceties[key]))
+    const font = typeof niceties.font === 'string' ? niceties.font.trim() : ''
+    root.toggleAttribute('data-twister-font', font !== '')
+    if (font) root.style.setProperty('--twister-font', font)
+    else root.style.removeProperty('--twister-font')
     stampRoute()
     stampDim()
   }
@@ -114,7 +121,7 @@
     'M23.643 4.937a9.65 9.65 0 0 1-2.825.775 4.958 4.958 0 0 0 2.163-2.723 9.99 9.99 0 0 1-3.127 1.195 4.916 4.916 0 0 0-8.384 4.482A13.944 13.944 0 0 1 1.64 3.162a4.916 4.916 0 0 0 1.523 6.558 4.903 4.903 0 0 1-2.229-.616v.061a4.917 4.917 0 0 0 3.946 4.818 4.935 4.935 0 0 1-2.224.084 4.923 4.923 0 0 0 4.6 3.419A9.869 9.869 0 0 1 0 19.523a13.94 13.94 0 0 0 7.548 2.212c9.057 0 14.01-7.503 14.01-14.01 0-.213-.005-.425-.014-.636a10.012 10.012 0 0 0 2.46-2.548l-.047-.02z'
   const MARK_HOSTS = 'header[role="banner"] a[aria-label="X"] svg path, #placeholder svg path, [data-testid="SideNav_NewTweet_Button"] ~ * svg path'
   function swapBird() {
-    const on = Boolean(niceties.classicBird)
+    const on = Boolean(niceties.classicTwitter)
     for (const path of document.querySelectorAll(MARK_HOSTS)) {
       const d = path.getAttribute('d')
       if (on && d === X_MARK) {
@@ -199,6 +206,119 @@
         }
       }
     }
+  }
+
+  // ── Classic wording ───────────────────────────────────────────────────────
+  // Posts are tweets again, in X's own controls only: buttons, tabs, menu
+  // items, the social-context line and the page title. Never in anything a
+  // person wrote. English only, because that is the one language whose
+  // words can be told apart from names without a table; other languages
+  // keep X's wording.
+  const WORDS = [
+    [/\bReposted\b/g, 'Retweeted'],
+    [/\breposted\b/g, 'retweeted'],
+    [/\bReposts\b/g, 'Retweets'],
+    [/\breposts\b/g, 'retweets'],
+    [/\bRepost\b/g, 'Retweet'],
+    [/\brepost\b/g, 'retweet'],
+    [/\bPosted\b/g, 'Tweeted'],
+    [/\bPosts\b/g, 'Tweets'],
+    [/\bposts\b/g, 'tweets'],
+    [/\bPost\b/g, 'Tweet'],
+    [/\bpost\b/g, 'tweet'],
+  ]
+  const WORDING_HOSTS =
+    'button, [role="button"], [role="tab"], [role="menuitem"], [data-testid="socialContext"], [data-testid="SideNav_NewTweet_Button"], h2[role="heading"], [data-testid="primaryColumn"] nav a, [data-testid="tweetTextarea_0"][data-placeholder], [aria-label]'
+  const PERSON_WROTE =
+    '[data-testid="tweetText"], [data-testid="User-Name"], [data-testid="UserName"], [data-testid="UserDescription"], [data-testid="UserCell"] [dir], [contenteditable="true"], [data-testid="tweetTextarea_0"]'
+  const english = () => /^en\b/.test(document.documentElement.lang || 'en')
+
+  function reword(text) {
+    let out = text
+    for (const [pattern, replacement] of WORDS) out = out.replace(pattern, replacement)
+    return out
+  }
+
+  function restoreWording() {
+    if (!niceties.classicTwitter || !english()) return
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement
+        if (!parent || !/post/i.test(node.nodeValue)) return NodeFilter.FILTER_REJECT
+        if (parent.closest(PERSON_WROTE)) return NodeFilter.FILTER_REJECT
+        return parent.closest(WORDING_HOSTS) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+      },
+    })
+    const nodes = []
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node)
+    for (const node of nodes) {
+      const next = reword(node.nodeValue)
+      if (next !== node.nodeValue) node.nodeValue = next
+    }
+    for (const element of document.querySelectorAll('[aria-label*="ost"], [data-placeholder*="ost"]')) {
+      if (element.closest(PERSON_WROTE)) continue
+      for (const attribute of ['aria-label', 'data-placeholder']) {
+        const value = element.getAttribute(attribute)
+        if (value && /post/i.test(value)) element.setAttribute(attribute, reword(value))
+      }
+    }
+    if (document.title && !document.title.includes('Twitter')) {
+      const title = document.title
+      const next = title === 'X' ? 'Twitter' : reword(title).replace(/ \/ X$/, ' / Twitter')
+      if (next !== title) document.title = next
+    }
+  }
+
+  // ── Layout ────────────────────────────────────────────────────────────────
+  // How wide X's page wants to be: its main column at X's own 600px, plus
+  // the right column when it is showing, plus the gutters. Rust keeps the
+  // window at least that wide, so showing the right column again never
+  // leaves it cut off.
+  const COLUMN_MIN = 600
+  const RIGHT_COLUMN = 350
+  const GUTTER = 32
+  let reportedWidth = 0
+  // X caps the column and two wrappers above it. Marking the ancestors up to
+  // <main> lets the stylesheet lift every cap without naming a class.
+  function markFit() {
+    const primary = document.querySelector('[data-testid="primaryColumn"]')
+    if (!primary) return
+    let node = primary.parentElement
+    while (node && node.tagName !== 'MAIN') {
+      node.setAttribute('data-twister-fit-col', '')
+      node = node.parentElement
+    }
+  }
+  function measureLayout() {
+    const primary = document.querySelector('[data-testid="primaryColumn"]')
+    if (!primary) return
+    if (niceties.fitTimeline) markFit()
+    // The right column is counted when the settings want it, even while X
+    // has collapsed it for lack of room: the window growing is what brings
+    // it back. In Messages the column is the conversation and always counts.
+    const right = document.querySelector('[data-testid="sidebarColumn"]')
+    const chat = document.documentElement.hasAttribute('data-twister-chat')
+    const wantRight = chat || !niceties.hideRightColumn
+    const rightWidth = right && right.offsetWidth > 0 ? right.offsetWidth : RIGHT_COLUMN
+    const nav = document.querySelector('header[role="banner"]')
+    const navVisible = nav && getComputedStyle(nav).display !== 'none' && nav.offsetWidth > 0
+    const width =
+      COLUMN_MIN +
+      (wantRight ? rightWidth + 24 : 0) +
+      (navVisible ? nav.offsetWidth : 0) +
+      GUTTER
+    if (Math.abs(width - reportedWidth) < 1) return
+    reportedWidth = width
+    // One line describing the column's ancestors, for the debug log: which
+    // wrapper caps the width is the first thing to know when X moves it.
+    const chain = []
+    let node = primary
+    while (node && node !== document.body && chain.length < 8) {
+      const style = getComputedStyle(node)
+      chain.push(`${node.tagName.toLowerCase()}[${node.getAttribute('data-testid') || ''}] ${node.offsetWidth}w max:${style.maxWidth} w:${style.width} ml:${style.marginLeft} mr:${style.marginRight}`)
+      node = node.parentElement
+    }
+    invoke('site_layout', { minWidth: width, detail: chain.join(' < ') })
   }
 
   // ── Location ──────────────────────────────────────────────────────────────
@@ -287,6 +407,8 @@
       markGrok()
       swapBird()
       stampDim()
+      restoreWording()
+      measureLayout()
     })
   })
 
@@ -299,6 +421,10 @@
     markPromoted()
     markGrok()
     swapBird()
+    restoreWording()
+    reportedWidth = 0
+    measureLayout()
+    if (window.__twisterCapture) window.__twisterCapture.setDownloadButton(niceties.downloadButton !== false)
   }
 
   // ── Going places ──────────────────────────────────────────────────────────
@@ -306,12 +432,19 @@
   // finishes: /compose/post loaded cold sits on the splash screen. X's own
   // navigation links are the in-app transition its router understands, so a
   // destination is reached by clicking the link X drew for it — hidden or
-  // not, a click on it still dispatches. Returns false when X has no link
-  // for the path, and Rust falls back to a full load.
+  // not, a click on it still dispatches. For a path X has no link for, a
+  // pushState followed by a popstate is what X's own router listens to for
+  // back and forward, and it takes the new location the same way. Returns
+  // false only when neither is possible; Rust then falls back to a full load.
   function go(path) {
     const link = document.querySelector(`header[role="banner"] a[href="${path}"]`)
-    if (!link) return false
-    link.click()
+    if (link) {
+      link.click()
+      return true
+    }
+    if (!/^\/[^\s]*$/.test(path) || !document.querySelector('#react-root')) return false
+    history.pushState(null, '', path)
+    window.dispatchEvent(new PopStateEvent('popstate', { state: null }))
     return true
   }
 

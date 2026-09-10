@@ -3,6 +3,7 @@
 @import '@fontsource-variable/inter';
 @import '@fontsource-variable/space-grotesk';
 @import './styles/themes.css';
+@import '@entro314labs/react-arc-tabs/styles.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -260,4 +261,67 @@
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ─── The tab strip (react-arc-tabs) on Twister's tokens ──────────────────
+   The strip is transparent so it sits in the titlebar band; the ACTIVE tab
+   is a filled pill. Class names below are the library's, not the house
+   convention. */
+.arc-tabs-theme .arc-tabs {
+  --arc-radius: 8px;
+  --arc-gap: 2px;
+  --arc-strip-padding: 0px;
+  --arc-seam-gap: 0px;
+  --arc-border-width: 0px;
+  --arc-tab-radius: 7px;
+  /* No notch: the strip shares the titlebar with buttons on either side,
+     and a tab that flared into the island would break the band's line. */
+  --arc-notch: 0px;
+  --arc-notch-offset-y: 0%;
+  --arc-motion-duration: var(--motion-micro);
+  --arc-motion-easing: var(--ease-butter);
+  --arc-accent: var(--primary);
+  --arc-text: var(--foreground);
+  --arc-tab-bg: transparent;
+  --arc-strip-bg: transparent;
+  --arc-notch-bg: transparent;
+  --arc-tab-hover-bg: color-mix(in oklab, var(--muted) 70%, transparent);
+  --arc-panel-bg: color-mix(in oklab, var(--card) 88%, var(--foreground) 12%);
+  --arc-panel-border: transparent;
+  --arc-panel-padding: 0;
+  --arc-surface-shadow: none;
+  width: auto;
+  max-width: 100%;
+}
+.arc-tabs-theme .arc-tabs__list {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  align-items: center;
+}
+.arc-tabs-theme .arc-tabs__list-scroll {
+  scrollbar-width: none;
+}
+.arc-tabs-theme .arc-tabs__tab {
+  border-radius: var(--arc-tab-radius) !important;
+}
+.arc-tabs-theme .arc-tabs__active-indicator {
+  border-radius: var(--arc-tab-radius) !important;
+  height: 100% !important;
+}
+.arc-tabs-theme .arc-tabs__tab::before,
+.arc-tabs-theme .arc-tabs__tab::after {
+  display: none;
+}
+.arc-tabs-theme .arc-tabs--size-sm .arc-tabs__tab {
+  min-height: 26px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.arc-tabs-theme .arc-tabs__tab[aria-selected='true'] {
+  color: var(--foreground);
+}
+.arc-tabs-theme .arc-tabs__panels {
+  display: none;
 }

@@ -11,6 +11,7 @@ import * as React from 'react'
 import { PaneTitlebar } from '@/components/shell/pane-titlebar'
 import { Sidebar } from '@/components/shell/sidebar'
 import { StatusBar } from '@/components/shell/status-bar'
+import { TOOLS_PANEL_W } from '@/lib/chrome'
 import { pageVariants } from '@/lib/motion'
 import { PrefsProvider, usePrefs } from '@/lib/prefs'
 import { useSettings } from '@/lib/query'
@@ -28,6 +29,15 @@ interface RouterContext {
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootShell,
 })
+
+/** The tool panels sit BESIDE the island; every other screen covers it. */
+export const isToolPath = (pathname: string) => pathname.startsWith('/tools')
+
+const TOOL_PATHS: Record<'openPeople' | 'openPosts' | 'openCompose', string> = {
+  openPeople: '/tools/people',
+  openPosts: '/tools/posts',
+  openCompose: '/tools/compose',
+}
 
 function RootShell() {
   const settings = useSettings()
@@ -64,7 +74,8 @@ function RootShell() {
 
 /**
  * The menu's shell-side verbs. They arrive as events because a menu accelerator fires whichever
- * webview has focus — usually x.com's — and this page is the only one that can act on them.
+ * webview has focus — usually x.com's — and this page is the only one that can act on them. Each
+ * tool toggles: asking for the panel that is already open closes it.
  */
 function ShellActionListener() {
   const navigate = useNavigate()
@@ -88,6 +99,13 @@ function ShellActionListener() {
           case 'toggleSidebar':
             setSidebarMode(latest.current.sidebarMode === 'full' ? 'rail' : 'full')
             break
+          case 'openPeople':
+          case 'openPosts':
+          case 'openCompose': {
+            const to = TOOL_PATHS[action]
+            void navigate({ to: latest.current.pathname === to ? '/' : to })
+            break
+          }
         }
       })
     })()
@@ -100,9 +118,11 @@ function ShellActionListener() {
 
 function ShellLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
-  // The site webview covers the island exactly, and only while the island is
-  // showing X. Every other screen hides it — it sits above this page.
-  const islandRef = useSiteIsland(pathname === '/')
+  const tools = isToolPath(pathname)
+  // The active tab's webview covers the island exactly, and only while the
+  // island is showing X — on its own or beside a tool panel. Every other
+  // screen hides it: it sits above this page.
+  const islandRef = useSiteIsland(pathname === '/' || tools)
 
   return (
     // The desk, with a sidebar on it and one island floating above.
@@ -121,22 +141,34 @@ function ShellLayout() {
         )}
       >
         <PaneTitlebar />
-        <main ref={islandRef} className="relative min-h-0 flex-1 overflow-hidden">
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              // Keyed on the route so the transition plays per destination
-              // rather than once, ever.
-              key={pathname}
-              variants={pageVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              className="absolute inset-0 overflow-y-auto"
+        <div className="flex min-h-0 flex-1">
+          {tools ? (
+            <aside
+              className="flex min-h-0 shrink-0 flex-col overflow-y-auto border-r border-border/50"
+              style={{ width: TOOLS_PANEL_W }}
             >
               <Outlet />
-            </motion.div>
-          </AnimatePresence>
-        </main>
+            </aside>
+          ) : null}
+          <main ref={islandRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+            {tools ? null : (
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  // Keyed on the route so the transition plays per destination
+                  // rather than once, ever.
+                  key={pathname}
+                  variants={pageVariants}
+                  initial="initial"
+                  animate="animate"
+                  exit="exit"
+                  className="absolute inset-0 overflow-y-auto"
+                >
+                  <Outlet />
+                </motion.div>
+              </AnimatePresence>
+            )}
+          </main>
+        </div>
         <StatusBar />
       </div>
     </div>

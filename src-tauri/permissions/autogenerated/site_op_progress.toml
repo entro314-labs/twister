@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-site-op-progress"
+description = "Enables the site_op_progress command without any pre-configured scope."
+commands.allow = ["site_op_progress"]
+
+[[permission]]
+identifier = "deny-site-op-progress"
+description = "Denies the site_op_progress command without any pre-configured scope."
+commands.deny = ["site_op_progress"]

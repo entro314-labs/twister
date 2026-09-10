@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-site-download"
+description = "Enables the site_download command without any pre-configured scope."
+commands.allow = ["site_download"]
+
+[[permission]]
+identifier = "deny-site-download"
+description = "Denies the site_download command without any pre-configured scope."
+commands.deny = ["site_download"]

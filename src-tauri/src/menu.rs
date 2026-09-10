@@ -20,6 +20,9 @@ pub const EVENT_SHELL: &str = "twister://shell";
 pub enum ShellAction {
     OpenSettings,
     ToggleSidebar,
+    OpenPeople,
+    OpenPosts,
+    OpenCompose,
 }
 
 const NAV: &[(&str, &str, &str, Destination)] = &[
@@ -56,6 +59,9 @@ const NAV: &[(&str, &str, &str, Destination)] = &[
     ),
 ];
 
+// One menu, one function: splitting it by submenu would only scatter the
+// accelerator table.
+#[allow(clippy::too_many_lines)]
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let about = AboutMetadataBuilder::new()
         .name(Some("Twister"))
@@ -88,8 +94,17 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                 .accelerator("CmdOrCtrl+N")
                 .build(app)?,
         )
+        .item(
+            &MenuItemBuilder::with_id("tab:new", "New Tab")
+                .accelerator("CmdOrCtrl+T")
+                .build(app)?,
+        )
         .separator()
-        .close_window()
+        .item(
+            &MenuItemBuilder::with_id("tab:close", "Close Tab")
+                .accelerator("CmdOrCtrl+W")
+                .build(app)?,
+        )
         .build()?;
 
     let edit = SubmenuBuilder::new(app, "Edit")
@@ -133,7 +148,36 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                 .accelerator("CmdOrCtrl+Backslash")
                 .build(app)?,
         )
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("tab:next", "Next Tab")
+                .accelerator("Ctrl+Tab")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("tab:previous", "Previous Tab")
+                .accelerator("Ctrl+Shift+Tab")
+                .build(app)?,
+        )
         .fullscreen()
+        .build()?;
+
+    let tools = SubmenuBuilder::new(app, "Tools")
+        .item(
+            &MenuItemBuilder::with_id("shell:people", "People")
+                .accelerator("CmdOrCtrl+Shift+P")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("shell:posts", "Posts")
+                .accelerator("CmdOrCtrl+Shift+O")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("shell:compose", "Write")
+                .accelerator("CmdOrCtrl+Shift+N")
+                .build(app)?,
+        )
         .build()?;
 
     let window = SubmenuBuilder::new(app, "Window")
@@ -144,7 +188,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build()?;
 
     MenuBuilder::new(app)
-        .items(&[&app_menu, &file, &edit, &view, &window])
+        .items(&[&app_menu, &file, &edit, &view, &tools, &window])
         .build()
 }
 
@@ -155,8 +199,18 @@ pub fn handle(app: &AppHandle, event: MenuEvent) {
         "site:forward" => site::act(app, Action::Forward),
         "site:reload" => site::act(app, Action::Reload),
         "nav:compose" => site::go(app, Destination::Compose),
+        "tab:new" => site::new_tab(app, None).map(|_| ()),
+        "tab:close" => match site::state(app).active {
+            0 => Ok(()),
+            id => site::close_tab(app, id),
+        },
+        "tab:next" => site::step_tab(app, 1),
+        "tab:previous" => site::step_tab(app, -1),
         "shell:settings" => emit_shell(app, ShellAction::OpenSettings),
         "shell:sidebar" => emit_shell(app, ShellAction::ToggleSidebar),
+        "shell:people" => emit_shell(app, ShellAction::OpenPeople),
+        "shell:posts" => emit_shell(app, ShellAction::OpenPosts),
+        "shell:compose" => emit_shell(app, ShellAction::OpenCompose),
         _ => match NAV.iter().find(|(nav_id, ..)| *nav_id == id) {
             Some((_, _, _, destination)) => site::go(app, *destination),
             None => return,

@@ -59,24 +59,81 @@ html[data-twister-hide-view-counts] article [data-testid="analytics"] {
 
 /* The classic blue on the buttons that used to be blue. The mark itself is
    swapped by the bridge, path for path. */
-html[data-twister-classic-bird] [data-testid="SideNav_NewTweet_Button"],
-html[data-twister-classic-bird] [data-testid="tweetButtonInline"],
-html[data-twister-classic-bird] [data-testid="tweetButton"],
-html[data-twister-classic-bird] button[data-testid$="-follow"] {
+html[data-twister-classic] [data-testid="SideNav_NewTweet_Button"],
+html[data-twister-classic] [data-testid="tweetButtonInline"],
+html[data-twister-classic] [data-testid="tweetButton"],
+html[data-twister-classic] button[data-testid$="-follow"] {
   background-color: #1da1f2 !important;
   color: #ffffff !important;
 }
-html[data-twister-classic-bird] [data-testid="SideNav_NewTweet_Button"] *,
-html[data-twister-classic-bird] [data-testid="tweetButtonInline"] *,
-html[data-twister-classic-bird] [data-testid="tweetButton"] *,
-html[data-twister-classic-bird] button[data-testid$="-follow"] * {
+html[data-twister-classic] [data-testid="SideNav_NewTweet_Button"] *,
+html[data-twister-classic] [data-testid="tweetButtonInline"] *,
+html[data-twister-classic] [data-testid="tweetButton"] *,
+html[data-twister-classic] button[data-testid$="-follow"] * {
   color: inherit !important;
 }
-html[data-twister-classic-bird] [data-testid="SideNav_NewTweet_Button"]:hover:not(:disabled),
-html[data-twister-classic-bird] [data-testid="tweetButtonInline"]:hover:not(:disabled),
-html[data-twister-classic-bird] [data-testid="tweetButton"]:hover:not(:disabled),
-html[data-twister-classic-bird] button[data-testid$="-follow"]:hover:not(:disabled) {
+html[data-twister-classic] [data-testid="SideNav_NewTweet_Button"]:hover:not(:disabled),
+html[data-twister-classic] [data-testid="tweetButtonInline"]:hover:not(:disabled),
+html[data-twister-classic] [data-testid="tweetButton"]:hover:not(:disabled),
+html[data-twister-classic] button[data-testid$="-follow"]:hover:not(:disabled) {
   background-color: #168bd2 !important;
+}
+
+/* Fit the timeline: X caps its main column at 600px and leaves the rest of
+   the island empty. Let the column and the layout around it fill what the
+   island has, keeping the right column at its own width when it shows. */
+html[data-twister-fit] main[role="main"],
+html[data-twister-fit] [data-twister-fit-col],
+html[data-twister-fit] [data-testid="primaryColumn"] {
+  max-width: none !important;
+  width: 100% !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+html[data-twister-fit] [data-testid="primaryColumn"] > div,
+html[data-twister-fit] [data-testid="primaryColumn"] > div > div {
+  max-width: none !important;
+}
+html[data-twister-fit] [data-testid="sidebarColumn"] {
+  flex: 0 0 auto !important;
+}
+
+/* Smooth scrolling on keyboard and programmatic jumps. */
+html[data-twister-smooth] {
+  scroll-behavior: smooth !important;
+}
+
+/* The font: everything X sets a face on, in the family chosen in Settings,
+   with the emoji faces kept at the end so emoji still draw. */
+html[data-twister-font] body,
+html[data-twister-font] body * {
+  font-family: var(--twister-font), "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif !important;
+}
+
+/* The download button the capture script adds to a post's action bar, drawn
+   like X's own: a bare glyph in the muted colour, coloured on hover. */
+[data-twister-download] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-left: 4px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: rgb(113, 118, 123);
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+[data-twister-download] svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+[data-twister-download]:hover {
+  background-color: rgba(29, 155, 240, 0.1);
+  color: rgb(29, 155, 240);
 }
 
 /* Dim: the inline half. X paints a few surfaces through style attributes

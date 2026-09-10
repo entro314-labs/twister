@@ -1,5 +1,5 @@
-//! Preferences and window placement, as two small JSON files in the app data
-//! directory. Nothing sensitive lives here: the x.com session is a cookie in
+//! Preferences, window placement and open tabs, as three small JSON files in
+//! the app data directory. Nothing sensitive lives here: the x.com session is a cookie in
 //! the webview's own store, which this app never reads.
 //!
 //! Every field has a default and unknown fields are ignored, so a file written
@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result, internal};
+use crate::site::SavedTabs;
 
 /// `commands::Settings` in the renderer mirrors this.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -21,6 +22,8 @@ pub struct Settings {
     /// `off` | `standard` | `strong`
     pub window_material: String,
     pub niceties: Niceties,
+    /// A CSS font-family for X's text, or empty for X's own.
+    pub font: String,
 }
 
 impl Default for Settings {
@@ -29,6 +32,25 @@ impl Default for Settings {
             theme: "system".into(),
             window_material: "standard".into(),
             niceties: Niceties::default(),
+            font: String::new(),
+        }
+    }
+}
+
+/// What the bridge receives: the switches plus the font, as one object.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SitePrefs {
+    #[serde(flatten)]
+    pub niceties: Niceties,
+    pub font: String,
+}
+
+impl Settings {
+    pub fn site_prefs(&self) -> SitePrefs {
+        SitePrefs {
+            niceties: self.niceties,
+            font: self.font.clone(),
         }
     }
 }
@@ -47,6 +69,11 @@ impl Settings {
                 "Unknown window material `{}`.",
                 self.window_material
             )));
+        }
+        // The font goes into a stylesheet verbatim; a family name has no
+        // business carrying anything that could close the declaration.
+        if self.font.len() > 120 || self.font.contains([';', '{', '}', '<', '>', '\\', '/']) {
+            return Err(AppError::InvalidInput("That is not a font family.".into()));
         }
         Ok(())
     }
@@ -78,10 +105,20 @@ pub struct Niceties {
     pub dock_badge: bool,
     /// Drop the floating Grok and Messages drawers X pins to the bottom-right.
     pub hide_drawers: bool,
-    /// The bird in place of the X mark, and the classic blue on the buttons.
-    pub classic_bird: bool,
+    /// Twitter, in one switch: the bird in place of the X mark, the classic
+    /// blue on the buttons, and posts called tweets again.
+    #[serde(alias = "classicBird")]
+    pub classic_twitter: bool,
     /// X's retired Dim theme, painted over Lights out.
     pub dim: bool,
+    /// Record the people and posts X loads into the page, for the tools.
+    pub capture: bool,
+    /// A download button on posts with photos or video.
+    pub download_button: bool,
+    /// Let the timeline column grow to fill the island.
+    pub fit_timeline: bool,
+    /// Animated scrolling on keyboard and programmatic jumps.
+    pub smooth_scroll: bool,
 }
 
 impl Default for Niceties {
@@ -95,8 +132,12 @@ impl Default for Niceties {
             hide_site_nav: true,
             dock_badge: true,
             hide_drawers: false,
-            classic_bird: false,
+            classic_twitter: false,
             dim: false,
+            capture: true,
+            download_button: true,
+            fit_timeline: true,
+            smooth_scroll: false,
         }
     }
 }
@@ -150,6 +191,14 @@ impl Store {
 
     pub fn save_window(&self, bounds: &WindowBounds) -> Result<()> {
         write_atomic(&self.dir.join("window.json"), bounds)
+    }
+
+    pub fn load_tabs(&self) -> SavedTabs {
+        load_or_default(&self.dir.join("tabs.json"))
+    }
+
+    pub fn save_tabs(&self, tabs: &SavedTabs) -> Result<()> {
+        write_atomic(&self.dir.join("tabs.json"), tabs)
     }
 }
 
@@ -205,6 +254,30 @@ mod tests {
         assert_eq!(parsed.theme, "dark");
         assert!(!parsed.niceties.hide_promoted);
         assert!(parsed.niceties.hide_extras_nav);
+        assert!(parsed.niceties.capture);
+    }
+
+    #[test]
+    fn the_old_bird_switch_still_reads() {
+        let parsed: Settings =
+            serde_json::from_str(r#"{"niceties":{"classicBird":true}}"#).expect("parses");
+        assert!(parsed.niceties.classic_twitter);
+        let prefs = serde_json::to_value(parsed.site_prefs()).expect("json");
+        assert_eq!(prefs["classicTwitter"], true);
+        assert_eq!(prefs["font"], "");
+    }
+
+    #[test]
+    fn fonts_are_family_names_only() {
+        let mut settings = Settings {
+            font: "Inter, sans-serif".into(),
+            ..Settings::default()
+        };
+        assert!(settings.validate().is_ok());
+        settings.font = "x; } html { display: none".into();
+        assert!(settings.validate().is_err());
+        settings.font = "a".repeat(121);
+        assert!(settings.validate().is_err());
     }
 
     #[test]

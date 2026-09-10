@@ -169,6 +169,9 @@ importers:
       '@base-ui/react':
         specifier: ^1.8.0
         version: 1.8.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@entro314labs/react-arc-tabs':
+        specifier: ^2.1.1
+        version: 2.1.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@fontsource-variable/inter':
         specifier: ^5.3.0
         version: 5.3.0
@@ -360,6 +363,13 @@ packages:
 
   '@emnapi/wasi-threads@1.2.2':
     resolution: {integrity: sha512-c95qOXkHdydNKhscBTebqEC1CVAZpyqOfVfBzQ1qgzyl3gfeldUjIggDbIZgDKsHLgnsM+igH7TJ/eAasaVuMA==}
+
+  '@entro314labs/react-arc-tabs@2.1.1':
+    resolution: {integrity: sha512-csv8wyDWdC1B0eBzCHC+yLvvaTX0hPm/1ZUTzyMO0fi2kmg8XUYz8p+bZT1D1hUiCmNvD68BX8Hq8y2SWVTbRw==}
+    engines: {node: '>=24.19.0'}
+    peerDependencies:
+      react: ^19.0.0 || ^19.2.8
+      react-dom: ^19.0.0 || ^19.2.8
 
   '@floating-ui/core@1.8.0':
     resolution: {integrity: sha512-0CIZ5itps/8x7BG8dEIhs53BvCUH2PCoogtakwRTut+Arm58sJooJ0AuZhLw2HJYIR5cMLNPBSS728sPho2khQ==}
@@ -2011,6 +2021,11 @@ snapshots:
     dependencies:
       tslib: 2.8.1
     optional: true
+
+  '@entro314labs/react-arc-tabs@2.1.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
+    dependencies:
+      react: 19.3.0
+      react-dom: 19.3.0(react@19.3.0)
 
   '@floating-ui/core@1.8.0':
     dependencies:

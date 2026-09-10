@@ -1,15 +1,22 @@
 [package]
 name = "twister"
-version = "0.1.0"
+version = "1.0.0"
 description = "Twister - a desktop client for X with niceties injected"
 authors = ["entro314-labs"]
 license = "MIT"
 edition = "2024"
 rust-version = "1.98.1"
+# Two binaries; `cargo run` (and `tauri dev`) mean the app.
+default-run = "twister"
 
 [lib]
 name = "twister_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+# The agent door: an MCP server over the same store, for `claude mcp add`.
+[[bin]]
+name = "twister-mcp"
+path = "src/bin/mcp.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -26,6 +33,9 @@ tauri-plugin-opener = "2"
 # signed-in session against the same cookie store.
 tauri-plugin-single-instance = "2"
 
+# Save dialogs for exports.
+tauri-plugin-dialog = "2"
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -34,11 +44,29 @@ dirs = "7"
 log = "0.4"
 env_logger = "0.11"
 
+# The store: everything the capture hook sees, jobs, scheduled posts,
+# downloads. One file in the app data directory.
+rusqlite = { version = "0.40", features = ["bundled"] }
+# Scheduling is civil-time arithmetic, and post dates come back as RFC 3339.
+chrono = { version = "0.4", features = ["serde"] }
+# Media downloads only: public twimg URLs, no cookies, no X API. The webview
+# is the only thing that ever talks to X signed in.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
+# X bills the 280 against graphemes after URL weighting.
+unicode-segmentation = "1"
+
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 # Vibrancy behind the transparent window. Taken direct rather than through
 # tauri's `set_effects`: tauri 2.11 links window-vibrancy 0.6, which predates
 # the newer materials and lacks the `clear_*` half a live toggle needs.
 window-vibrancy = "0.8"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The title-bar chrome AppKit places the traffic lights in (windowing.rs). The
+# objc2 family emits a hard `compile_error!` off Apple targets, so it has to
+# live in this section rather than behind a `#[cfg]` at the use site alone.
+objc2 = "0.6"
+objc2-app-kit = "0.3"
 
 [profile.dev]
 opt-level = 1

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-site-layout"
+description = "Enables the site_layout command without any pre-configured scope."
+commands.allow = ["site_layout"]
+
+[[permission]]
+identifier = "deny-site-layout"
+description = "Denies the site_layout command without any pre-configured scope."
+commands.deny = ["site_layout"]

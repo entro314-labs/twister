@@ -4,7 +4,10 @@ import {
   IconCompass,
   IconHome,
   IconMail,
+  IconNotes,
+  IconPencil,
   IconUser,
+  IconUsers,
 } from '@tabler/icons-react'
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import * as React from 'react'
@@ -22,9 +25,11 @@ import {
   SIDEBAR_RAIL_W,
   TITLEBAR_H,
   TITLEBAR_INSET_LEFT,
+  TITLEBAR_INSET_LEFT_FULLSCREEN,
 } from '@/lib/chrome'
+import { useIsFullscreen } from '@/lib/fullscreen'
 import { usePrefs } from '@/lib/prefs'
-import { useNavigateSite, useSiteState } from '@/lib/query'
+import { useActiveTab, useNavigateSite, useSiteState } from '@/lib/query'
 import type { Destination, Section } from '@/lib/tauri/types'
 import { useTip, withHandlers } from '@/lib/tooltip'
 import { cn } from '@/lib/utils'
@@ -72,10 +77,28 @@ const NAV: NavItem[] = [
   { destination: 'profile', section: 'profile', label: 'Profile', shortcut: '6', icon: IconUser },
 ]
 
+interface ToolItem {
+  to: '/tools/people' | '/tools/posts' | '/tools/compose'
+  label: string
+  shortcut: string
+  icon: React.ElementType
+}
+
+// The tools open a panel beside the island rather than moving the site.
+const TOOLS: ToolItem[] = [
+  { to: '/tools/people', label: 'People', shortcut: '⇧P', icon: IconUsers },
+  { to: '/tools/posts', label: 'Posts', shortcut: '⇧O', icon: IconNotes },
+  { to: '/tools/compose', label: 'Write', shortcut: '⇧N', icon: IconPencil },
+]
+
+/** Sidebar glyphs: one step larger than the text so a rail of icons reads at a glance. */
+const ICON_SIZE = 18
+
 /**
  * The navigation column — and, with the system frame gone, the window's leading chrome. It runs the
- * full window height and hosts the macOS traffic lights in its own header band, so there is no
- * shared horizontal titlebar; the island carries its own (see PaneTitlebar).
+ * full window height, and its header band is sized (TITLEBAR_H) to the macOS title bar AppKit draws
+ * the traffic lights in, so the lights sit centred in it; there is no shared horizontal titlebar,
+ * and the island carries its own (see PaneTitlebar).
  *
  * Two states. The outer shell animates its width while the inner wrapper keeps a fixed one, so
  * content slides out of the clip instead of squashing mid-animation.
@@ -114,6 +137,11 @@ export function Sidebar() {
 }
 
 function FullContent() {
+  // The traffic lights ride in this band, so the wordmark starts after them — except in
+  // fullscreen, where the OS takes them away and the reserved space would just be a hole.
+  const isFullscreen = useIsFullscreen()
+  const insetLeft = isFullscreen ? TITLEBAR_INSET_LEFT_FULLSCREEN : TITLEBAR_INSET_LEFT
+
   return (
     <div
       className="flex h-full flex-col"
@@ -124,7 +152,7 @@ function FullContent() {
         className="drag-region flex shrink-0 items-center"
         style={{
           height: TITLEBAR_H,
-          paddingLeft: IS_MACOS ? TITLEBAR_INSET_LEFT : 14,
+          paddingLeft: IS_MACOS ? insetLeft : 14,
         }}
       >
         <span className="pointer-events-none truncate font-display text-sm font-semibold tracking-tight">
@@ -136,6 +164,10 @@ function FullContent() {
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-1">
         {NAV.map((item) => (
           <NavRow key={item.destination} item={item} />
+        ))}
+        <Divider />
+        {TOOLS.map((item) => (
+          <ToolRow key={item.to} item={item} />
         ))}
       </nav>
 
@@ -149,8 +181,9 @@ function FullContent() {
 function RailContent() {
   return (
     <div className="flex h-full flex-col" style={{ width: SIDEBAR_RAIL_W }}>
-      {/* On macOS the traffic lights own this band; the toggle takes the next
-          row, on the same axis as every icon under it. */}
+      {/* On macOS the traffic lights own this band — the rail is wide enough
+          (SIDEBAR_RAIL_W) that all three fit inside its column — so the toggle
+          takes the next row, on the same axis as every icon under it. */}
       <header
         data-tauri-drag-region
         className="drag-region flex shrink-0 items-center justify-center"
@@ -166,6 +199,10 @@ function RailContent() {
       <nav className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto py-1">
         {NAV.map((item) => (
           <NavRow key={item.destination} item={item} rail />
+        ))}
+        <Divider rail />
+        {TOOLS.map((item) => (
+          <ToolRow key={item.to} item={item} rail />
         ))}
       </nav>
       <div className="flex flex-col items-center gap-1 pb-2">
@@ -184,6 +221,35 @@ const rowClass = (active: boolean, rail: boolean, disabled = false) =>
       : 'text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground',
     disabled && 'opacity-50 hover:bg-transparent hover:text-muted-foreground',
   )
+
+function Divider({ rail = false }: { rail?: boolean }) {
+  return <div aria-hidden className={cn('my-1.5 h-px bg-border/60', rail ? 'w-5' : 'mx-2.5')} />
+}
+
+/** A tool panel, beside the island. Clicking the open one closes it. */
+function ToolRow({ item, rail = false }: { item: ToolItem; rail?: boolean }) {
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const navigate = useNavigate()
+  const active = pathname === item.to
+  const Icon = item.icon
+  const tip = useTip(item.label, `${MOD_KEY}${item.shortcut}`)
+
+  return (
+    <button
+      type="button"
+      aria-current={active ? 'page' : undefined}
+      {...tip}
+      onClick={() => {
+        void navigate({ to: active ? '/' : item.to })
+      }}
+      className={rowClass(active, rail)}
+    >
+      <ActiveMarker active={active} />
+      <Icon size={ICON_SIZE} stroke={1.75} className="shrink-0" />
+      {rail ? null : <span className="truncate">{item.label}</span>}
+    </button>
+  )
+}
 
 function ActiveMarker({ active }: { active: boolean }) {
   return (
@@ -207,14 +273,15 @@ function NavRow({ item, rail = false }: { item: NavItem; rail?: boolean }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const navigate = useNavigate()
   const site = useSiteState()
+  const tab = useActiveTab()
   const go = useNavigateSite()
 
-  const onIsland = pathname === '/'
-  const active = onIsland && site.data?.section === item.section
+  const onIsland = pathname === '/' || pathname.startsWith('/tools')
+  const active = onIsland && tab?.section === item.section
   // Profile needs the handle, which the bridge only learns once X has drawn
   // its own navigation — a row that cannot go anywhere yet says so.
   const disabled = item.destination === 'profile' && !site.data?.handle
-  const unread = item.section === 'notifications' ? (site.data?.unread ?? 0) : 0
+  const unread = item.section === 'notifications' ? (tab?.unread ?? 0) : 0
   const Icon = item.icon
   const tip = useTip(item.label, `${MOD_KEY}${item.shortcut}`)
 
@@ -232,7 +299,7 @@ function NavRow({ item, rail = false }: { item: NavItem; rail?: boolean }) {
     >
       <ActiveMarker active={active} />
       <span className="relative shrink-0">
-        <Icon className="size-4" stroke={1.75} />
+        <Icon size={ICON_SIZE} stroke={1.75} />
         {rail && unread > 0 ? (
           <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary ring-2 ring-[var(--sidebar)]" />
         ) : null}
@@ -268,7 +335,7 @@ function SettingsRow({ rail = false }: { rail?: boolean }) {
       className={rowClass(active, rail)}
     >
       <ActiveMarker active={active} />
-      <SettingsIcon ref={iconRef} size={16} className="shrink-0" />
+      <SettingsIcon ref={iconRef} size={ICON_SIZE} className="shrink-0" />
       {rail ? null : <span className="truncate">Settings</span>}
     </Link>
   )
@@ -295,7 +362,7 @@ function LayoutButton({ rail = false }: { rail?: boolean }) {
         rail ? 'size-9' : 'mr-2 ml-auto size-7',
       )}
     >
-      <Icon ref={iconRef} size={16} />
+      <Icon ref={iconRef} size={ICON_SIZE} />
     </button>
   )
 }

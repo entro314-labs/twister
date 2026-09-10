@@ -1,14 +1,23 @@
 //! Twister — a desktop client for X with niceties injected.
 //!
-//! One window, two child webviews: the shell (this app's React frame) and the
-//! site (x.com, with a bridge script). The window is created here rather than
-//! in `tauri.conf.json` because a configured window is a single-webview
-//! window, and the whole design rests on there being two.
+//! One window, child webviews: the shell (this app's React frame) and one
+//! site webview per tab (x.com, with the bridge, capture and operations
+//! scripts). The window is created here rather than in `tauri.conf.json`
+//! because a configured window is a single-webview window, and the whole
+//! design rests on there being several.
 
+mod capture;
 mod commands;
+mod compose;
+pub mod db;
+mod download;
 mod error;
+mod export;
+pub mod mcp;
 mod menu;
-mod settings;
+mod ops;
+mod scheduler;
+pub mod settings;
 mod site;
 mod tooltip;
 mod userland;
@@ -17,7 +26,7 @@ mod windowing;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::utils::config::{LogicalPosition as ConfigPosition, WindowConfig};
+use tauri::utils::config::WindowConfig;
 use tauri::webview::WebviewBuilder;
 use tauri::window::WindowBuilder;
 use tauri::{
@@ -32,7 +41,13 @@ use site::Site;
 pub const MAIN_WINDOW: &str = "main";
 
 const DEFAULT_SIZE: (f64, f64) = (1240.0, 820.0);
-const MIN_SIZE: (f64, f64) = (880.0, 580.0);
+pub const MIN_SIZE: (f64, f64) = (880.0, 580.0);
+
+/// How scheduled times are written: RFC 3339, UTC, to the second — a form
+/// that sorts as text, which is how the store compares them.
+pub fn scheduled_format(when: chrono::DateTime<chrono::Utc>) -> String {
+    when.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -50,6 +65,7 @@ pub fn run() {
             show_main_window(app);
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .menu(menu::build)
         .on_menu_event(menu::handle)
         .setup(setup)
@@ -59,7 +75,7 @@ pub fn run() {
             WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 remember_bounds(window.app_handle());
-                persist_bounds(window.app_handle());
+                persist(window.app_handle());
                 let _ = window.hide();
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
@@ -92,10 +108,32 @@ pub fn run() {
             commands::reload_site,
             commands::show_tooltip,
             commands::hide_tooltip,
+            commands::new_tab,
+            commands::close_tab,
+            commands::activate_tab,
+            commands::get_store_counts,
+            commands::list_people,
+            commands::list_posts,
+            commands::export_people,
+            commands::export_posts,
+            commands::clear_captured,
+            commands::start_op,
+            commands::cancel_op,
+            commands::get_ops,
+            commands::prepare_post,
+            commands::post_now,
+            commands::schedule_post,
+            commands::list_scheduled_posts,
+            commands::delete_scheduled_post,
+            commands::open_downloads_dir,
             commands::tooltip_ready,
             commands::site_settings,
             commands::site_navigated,
             commands::site_profile,
+            commands::site_capture,
+            commands::site_op_progress,
+            commands::site_download,
+            commands::site_layout,
         ])
         .build(tauri::generate_context!())
         .expect("Twister failed to start")
@@ -104,7 +142,7 @@ pub fn run() {
             // single-instance handler never fires for it; this is the one
             // event that brings a hidden window back.
             RunEvent::Reopen { .. } => show_main_window(app),
-            RunEvent::ExitRequested { .. } => persist_bounds(app),
+            RunEvent::ExitRequested { .. } => persist(app),
             _ => {}
         });
 }
@@ -113,10 +151,19 @@ fn setup(app: &mut tauri::App) -> std::result::Result<(), Box<dyn std::error::Er
     let store = Store::open()?;
     let settings = store.load_settings();
     let saved = store.load_window();
-    log::info!("settings in {}", settings::data_dir()?.display());
+    let tabs = store.load_tabs();
+    let dir = settings::data_dir()?;
+    log::info!("settings in {}", dir.display());
 
+    let db = db::Db::open_at(&dir.join(db::DB_FILE))?;
+    let left_running = db.settle_stale_jobs()?;
+    if left_running > 0 {
+        log::info!("{left_running} job(s) were left running by the last quit");
+    }
+    app.manage(db);
+    app.manage(ops::Ops::default());
     app.manage(AppState {
-        site: Site::new(settings.niceties),
+        site: Site::new(settings.site_prefs()),
         settings: Mutex::new(settings.clone()),
         bounds: Mutex::new(saved),
         store,
@@ -124,6 +171,10 @@ fn setup(app: &mut tauri::App) -> std::result::Result<(), Box<dyn std::error::Er
     app.manage(tooltip::Tooltip::default());
 
     let window = build_window(app, saved)?;
+    // Before the material and before any child webview: the style-mask and
+    // toolbar changes reshape the title bar, and the shell measures against it.
+    #[cfg(target_os = "macos")]
+    windowing::apply_macos_chrome(&window);
     windowing::apply_material(&window, &settings.window_material);
 
     let scale = window.scale_factor()?;
@@ -134,9 +185,10 @@ fn setup(app: &mut tauri::App) -> std::result::Result<(), Box<dyn std::error::Er
         .auto_resize();
     window.add_child(shell, LogicalPosition::new(0.0, 0.0), size)?;
 
-    // Added second, so it sits above the shell. The island is its territory.
-    site::build(app.handle(), &window, settings.niceties)?;
+    // Added after the shell, so the tabs sit above it. The island is theirs.
+    site::restore_tabs(app.handle(), &window, &tabs)?;
     tooltip::create(app.handle(), &window)?;
+    app.manage(scheduler::Scheduler::start(app.handle().clone()));
 
     // The shell shows the window once it has painted. If it never does — a
     // dev server that is not running, a broken build — a window is still
@@ -149,8 +201,9 @@ fn setup(app: &mut tauri::App) -> std::result::Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-/// A plain window (no webview of its own), from a config so the macOS traffic
-/// lights can be placed — the builder API has no setter for that.
+/// A plain window (no webview of its own). Built from a `WindowConfig` because
+/// that is the only shape `hidden_title` is settable through; the macOS title
+/// bar itself is finished in `windowing::apply_macos_chrome`.
 fn build_window(app: &tauri::App, saved: Option<WindowBounds>) -> tauri::Result<tauri::Window> {
     let config = WindowConfig {
         label: MAIN_WINDOW.into(),
@@ -163,7 +216,6 @@ fn build_window(app: &tauri::App, saved: Option<WindowBounds>) -> tauri::Result<
         transparent: true,
         title_bar_style: TitleBarStyle::Overlay,
         hidden_title: true,
-        traffic_light_position: Some(ConfigPosition { x: 18.0, y: 20.0 }),
         ..WindowConfig::default()
     };
     let window = WindowBuilder::from_config(app, &config)?.build()?;
@@ -190,7 +242,7 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
-fn remember_bounds(app: &AppHandle) {
+pub fn remember_bounds(app: &AppHandle) {
     let Some(window) = app.get_window(MAIN_WINDOW) else {
         return;
     };
@@ -225,12 +277,16 @@ fn remember_bounds(app: &AppHandle) {
     }
 }
 
-fn persist_bounds(app: &AppHandle) {
+/// Writes the window placement and the open tabs.
+fn persist(app: &AppHandle) {
     let state = app.state::<AppState>();
     let bounds = state.bounds.lock().ok().and_then(|b| *b);
     if let Some(bounds) = bounds
         && let Err(err) = state.store.save_window(&bounds)
     {
         log::warn!("could not save the window placement: {err}");
+    }
+    if let Err(err) = state.store.save_tabs(&site::saved_tabs(app)) {
+        log::warn!("could not save the open tabs: {err}");
     }
 }

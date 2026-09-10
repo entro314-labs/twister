@@ -1,8 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "shell",
-  "description": "Twister's own webview: the sidebar, titlebar, status bar and settings.",
-  "webviews": ["shell"],
+  "description": "Twister's own webview: the sidebar, tabs, titlebar, status bar, settings and the tools.",
+  "webviews": [
+    "shell"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
@@ -27,6 +29,24 @@
     "allow-open-user-assets-dir",
     "allow-reload-site",
     "allow-show-tooltip",
-    "allow-hide-tooltip"
+    "allow-hide-tooltip",
+    "allow-new-tab",
+    "allow-close-tab",
+    "allow-activate-tab",
+    "allow-get-store-counts",
+    "allow-list-people",
+    "allow-list-posts",
+    "allow-export-people",
+    "allow-export-posts",
+    "allow-clear-captured",
+    "allow-start-op",
+    "allow-cancel-op",
+    "allow-get-ops",
+    "allow-prepare-post",
+    "allow-post-now",
+    "allow-schedule-post",
+    "allow-list-scheduled-posts",
+    "allow-delete-scheduled-post",
+    "allow-open-downloads-dir"
   ]
 }

@@ -2,7 +2,25 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { invokeCommand } from '@/lib/tauri/client'
 import { IPC_COMMANDS } from '@/lib/tauri/ipc'
-import type { Destination, Settings, SiteAction, SiteState, UserAssets } from '@/lib/tauri/types'
+import type {
+  Destination,
+  ExportFormat,
+  Job,
+  OpKind,
+  OpsState,
+  Person,
+  PersonFilter,
+  Post,
+  PostFilter,
+  PreparedPost,
+  ScheduledPost,
+  Settings,
+  SiteAction,
+  SiteState,
+  StoreCounts,
+  TabState,
+  UserAssets,
+} from '@/lib/tauri/types'
 
 import { queryKeys } from './keys'
 
@@ -33,6 +51,12 @@ export function useSiteState() {
   })
 }
 
+/** The tab in front, or `undefined` before the first one exists. */
+export function useActiveTab(): TabState | undefined {
+  const site = useSiteState()
+  return site.data?.tabs.find((tab) => tab.id === site.data?.active)
+}
+
 /** What is in the scripts and styles folder right now — not what is running. */
 export function useUserAssets() {
   return useQuery({
@@ -41,6 +65,46 @@ export function useUserAssets() {
     // The folder changes behind the app's back, so the list is re-read each
     // time the settings screen shows it.
     staleTime: 0,
+  })
+}
+
+export function useStoreCounts() {
+  return useQuery({
+    queryKey: queryKeys.store.counts(),
+    queryFn: async () => invokeCommand<StoreCounts>(IPC_COMMANDS.getStoreCounts),
+    staleTime: 5000,
+  })
+}
+
+export function usePeople(filter: PersonFilter) {
+  return useQuery({
+    queryKey: queryKeys.store.people(filter),
+    queryFn: async () => invokeCommand<Person[]>(IPC_COMMANDS.listPeople, { filter }),
+    placeholderData: (previous) => previous,
+  })
+}
+
+export function usePosts(filter: PostFilter) {
+  return useQuery({
+    queryKey: queryKeys.store.posts(filter),
+    queryFn: async () => invokeCommand<Post[]>(IPC_COMMANDS.listPosts, { filter }),
+    placeholderData: (previous) => previous,
+  })
+}
+
+/** Fetched once; the running job is pushed from then on. */
+export function useOps() {
+  return useQuery({
+    queryKey: queryKeys.ops.state(),
+    queryFn: async () => invokeCommand<OpsState>(IPC_COMMANDS.getOps),
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+}
+
+export function useScheduledPosts() {
+  return useQuery({
+    queryKey: queryKeys.schedule.list(),
+    queryFn: async () => invokeCommand<ScheduledPost[]>(IPC_COMMANDS.listScheduledPosts),
   })
 }
 
@@ -87,7 +151,7 @@ export function useOpenUserAssetsDir() {
   })
 }
 
-/** Rebuilds the site view so folder changes start running; the page reloads. */
+/** Rebuilds every tab so folder changes start running; the pages reload. */
 export function useReloadSite() {
   const client = useQueryClient()
   return useMutation({
@@ -95,5 +159,119 @@ export function useReloadSite() {
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.userland.root })
     },
+  })
+}
+
+export function useNewTab() {
+  return useMutation({
+    mutationFn: async (url?: string) =>
+      invokeCommand<number>(IPC_COMMANDS.newTab, { url: url ?? null }),
+  })
+}
+
+export function useCloseTab() {
+  return useMutation({
+    mutationFn: async (id: number) => invokeCommand<Nothing>(IPC_COMMANDS.closeTab, { id }),
+  })
+}
+
+export function useActivateTab() {
+  return useMutation({
+    mutationFn: async (id: number) => invokeCommand<Nothing>(IPC_COMMANDS.activateTab, { id }),
+  })
+}
+
+/** Resolves with the path written, or `null` when the save dialog was dismissed. */
+export function useExportPeople() {
+  return useMutation({
+    mutationFn: async (input: { filter: PersonFilter; format: ExportFormat }) =>
+      invokeCommand<string | null>(IPC_COMMANDS.exportPeople, input),
+  })
+}
+
+export function useExportPosts() {
+  return useMutation({
+    mutationFn: async (input: { filter: PostFilter; format: ExportFormat }) =>
+      invokeCommand<string | null>(IPC_COMMANDS.exportPosts, input),
+  })
+}
+
+export function useClearCaptured() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async () => invokeCommand<Nothing>(IPC_COMMANDS.clearCaptured),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.store.root })
+    },
+  })
+}
+
+export function useStartOp() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: { kind: OpKind; params: Record<string, unknown>; dryRun: boolean }) =>
+      invokeCommand<Job>(IPC_COMMANDS.startOp, input),
+    onSuccess: (job) => {
+      client.setQueryData<OpsState>(queryKeys.ops.state(), (previous) => ({
+        running: job,
+        recent: previous?.recent ?? [],
+      }))
+    },
+  })
+}
+
+export function useCancelOp() {
+  return useMutation({
+    mutationFn: async () => invokeCommand<Nothing>(IPC_COMMANDS.cancelOp),
+  })
+}
+
+export function usePreparePost(markdown: string) {
+  return useQuery({
+    queryKey: ['compose', 'prepare', markdown] as const,
+    queryFn: async () => invokeCommand<PreparedPost>(IPC_COMMANDS.preparePost, { markdown }),
+    placeholderData: (previous) => previous,
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+}
+
+export function usePostNow() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (markdown: string) => invokeCommand<Job>(IPC_COMMANDS.postNow, { markdown }),
+    onSuccess: (job) => {
+      client.setQueryData<OpsState>(queryKeys.ops.state(), (previous) => ({
+        running: job,
+        recent: previous?.recent ?? [],
+      }))
+    },
+  })
+}
+
+export function useSchedulePost() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: { markdown: string; scheduledAt: string }) =>
+      invokeCommand<ScheduledPost>(IPC_COMMANDS.schedulePost, input),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.schedule.root })
+    },
+  })
+}
+
+export function useDeleteScheduledPost() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: number) =>
+      invokeCommand<Nothing>(IPC_COMMANDS.deleteScheduledPost, { id }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.schedule.root })
+    },
+  })
+}
+
+export function useOpenDownloadsDir() {
+  return useMutation({
+    mutationFn: async () => invokeCommand<Nothing>(IPC_COMMANDS.openDownloadsDir),
   })
 }

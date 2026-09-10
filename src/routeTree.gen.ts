@@ -11,6 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ToolsComposeRouteImport } from './routes/tools/compose'
+import { Route as ToolsPeopleRouteImport } from './routes/tools/people'
+import { Route as ToolsPostsRouteImport } from './routes/tools/posts'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,31 +25,65 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ToolsComposeRoute = ToolsComposeRouteImport.update({
+  id: '/tools/compose',
+  path: '/tools/compose',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ToolsPeopleRoute = ToolsPeopleRouteImport.update({
+  id: '/tools/people',
+  path: '/tools/people',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ToolsPostsRoute = ToolsPostsRouteImport.update({
+  id: '/tools/posts',
+  path: '/tools/posts',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
+  '/tools/compose': typeof ToolsComposeRoute
+  '/tools/people': typeof ToolsPeopleRoute
+  '/tools/posts': typeof ToolsPostsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
+  '/tools/compose': typeof ToolsComposeRoute
+  '/tools/people': typeof ToolsPeopleRoute
+  '/tools/posts': typeof ToolsPostsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
+  '/tools/compose': typeof ToolsComposeRoute
+  '/tools/people': typeof ToolsPeopleRoute
+  '/tools/posts': typeof ToolsPostsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/settings'
+  fullPaths:
+    '/' | '/settings' | '/tools/compose' | '/tools/people' | '/tools/posts'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/settings'
-  id: '__root__' | '/' | '/settings'
+  to: '/' | '/settings' | '/tools/compose' | '/tools/people' | '/tools/posts'
+  id:
+    | '__root__'
+    | '/'
+    | '/settings'
+    | '/tools/compose'
+    | '/tools/people'
+    | '/tools/posts'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SettingsRoute: typeof SettingsRoute
+  ToolsComposeRoute: typeof ToolsComposeRoute
+  ToolsPeopleRoute: typeof ToolsPeopleRoute
+  ToolsPostsRoute: typeof ToolsPostsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -65,12 +102,36 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/tools/compose': {
+      id: '/tools/compose'
+      path: '/tools/compose'
+      fullPath: '/tools/compose'
+      preLoaderRoute: typeof ToolsComposeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tools/people': {
+      id: '/tools/people'
+      path: '/tools/people'
+      fullPath: '/tools/people'
+      preLoaderRoute: typeof ToolsPeopleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tools/posts': {
+      id: '/tools/posts'
+      path: '/tools/posts'
+      fullPath: '/tools/posts'
+      preLoaderRoute: typeof ToolsPostsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SettingsRoute: SettingsRoute,
+  ToolsComposeRoute: ToolsComposeRoute,
+  ToolsPeopleRoute: ToolsPeopleRoute,
+  ToolsPostsRoute: ToolsPostsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

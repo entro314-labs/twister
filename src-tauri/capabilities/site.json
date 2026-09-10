@@ -1,10 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "site",
-  "description": "x.com, reached only through the bridge. Three commands, each validating its input, and nothing that reads or changes anything on this machine. The label is generational: every rebuild gets a new one.",
+  "description": "x.com, reached only through the bridge. Seven commands, each validating its input: the prefs, a navigation, the signed-in handle, what X loaded, an operation's progress, a download request and a layout measurement. Nothing that reads or changes anything else on this machine. Labels are per tab: every tab gets a new one.",
   "webviews": ["site-*"],
   "remote": {
     "urls": ["https://x.com/*", "https://*.x.com/*", "https://twitter.com/*", "https://*.twitter.com/*"]
   },
-  "permissions": ["allow-site-settings", "allow-site-navigated", "allow-site-profile"]
+  "permissions": [
+    "allow-site-settings",
+    "allow-site-navigated",
+    "allow-site-profile",
+    "allow-site-capture",
+    "allow-site-op-progress",
+    "allow-site-download",
+    "allow-site-layout"
+  ]
 }

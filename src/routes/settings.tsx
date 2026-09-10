@@ -3,16 +3,20 @@ import { getVersion } from '@tauri-apps/api/app'
 import * as React from 'react'
 
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
 import { Select } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { MOD_KEY } from '@/lib/chrome'
 import {
+  useClearCaptured,
+  useOpenDownloadsDir,
   useOpenUserAssetsDir,
   useReloadSite,
   useSettings,
   useSignOut,
   useSiteState,
+  useStoreCounts,
   useUpdateSettings,
   useUserAssets,
 } from '@/lib/query'
@@ -62,9 +66,29 @@ const NICETIES: Array<{ key: keyof Niceties; label: string; hint: string }> = [
     hint: 'The Grok and Messages panels X pins to the bottom-right corner.',
   },
   {
-    key: 'classicBird',
-    label: 'The bird',
-    hint: 'The blue bird in place of the X mark, and the classic blue on Post and Follow.',
+    key: 'classicTwitter',
+    label: 'Twitter',
+    hint: 'One switch: the blue bird in place of the X mark, the classic blue on Post and Follow, and posts called tweets again in X’s own buttons, tabs and titles (English only).',
+  },
+  {
+    key: 'fitTimeline',
+    label: 'Fit the timeline',
+    hint: 'Lets X’s 600px column grow to fill the island. Twister also keeps the window wide enough for X’s layout, right column included when it shows.',
+  },
+  {
+    key: 'smoothScroll',
+    label: 'Smooth scrolling',
+    hint: 'Animated scrolling on keyboard and programmatic jumps. Refresh rate is the display’s own; the site view already draws at it.',
+  },
+  {
+    key: 'downloadButton',
+    label: 'Download button on posts',
+    hint: 'A button in each post’s action bar that saves its photos or video, at full size, to Downloads/Twister.',
+  },
+  {
+    key: 'capture',
+    label: 'Remember what X loads',
+    hint: 'Keeps the people and posts X loads into a tab in a local store, for the People and Posts tools. Nothing is fetched; nothing leaves this machine.',
   },
   {
     key: 'dim',
@@ -84,8 +108,11 @@ const SHORTCUTS: Array<{ keys: string; does: string }> = [
     does: 'Home, Explore, Notifications, Messages, Bookmarks, Profile',
   },
   { keys: `${MOD_KEY}N`, does: 'New post' },
+  { keys: `${MOD_KEY}T  ${MOD_KEY}W`, does: 'New tab, close tab' },
+  { keys: 'Ctrl⇥  Ctrl⇧⇥', does: 'Next tab, previous tab' },
   { keys: `${MOD_KEY}[  ${MOD_KEY}]`, does: 'Back, forward' },
   { keys: `${MOD_KEY}R`, does: 'Reload the page' },
+  { keys: `${MOD_KEY}⇧P  ${MOD_KEY}⇧O  ${MOD_KEY}⇧N`, does: 'People, Posts, Write' },
   { keys: `${MOD_KEY}\\`, does: 'Collapse or expand the sidebar' },
   { keys: `${MOD_KEY},`, does: 'Settings' },
 ]
@@ -152,6 +179,19 @@ function SettingsScreen() {
             <option value="strong">Strong</option>
           </Select>
         </Row>
+        <Row
+          label="Font on X"
+          hint="A font family for X’s text, as CSS would name it — “Inter”, “Georgia, serif”. Empty keeps X’s own."
+        >
+          <FontField
+            // Remounted when the stored value changes, so the draft starts from it.
+            key={current.font}
+            value={current.font}
+            onCommit={(font) => {
+              patch({ font })
+            }}
+          />
+        </Row>
       </Section>
 
       <Section
@@ -171,6 +211,8 @@ function SettingsScreen() {
       </Section>
 
       <UserlandSection />
+
+      <StoreSection />
 
       <AccountSection />
 
@@ -326,6 +368,112 @@ function UserlandSection() {
           <span className="ml-auto shrink-0 tabular-nums">{formatBytes(asset.bytes)}</span>
         </div>
       ))}
+      {error ? <p className="px-3 py-2 text-xs text-destructive">{error}</p> : null}
+    </Section>
+  )
+}
+
+/** Committed on blur or Enter rather than per keystroke: each commit rebuilds X's styling. */
+function FontField({ value, onCommit }: { value: string; onCommit: (font: string) => void }) {
+  const [draft, setDraft] = React.useState(value)
+  return (
+    <Input
+      value={draft}
+      placeholder="X’s own"
+      className="w-48"
+      onChange={(event) => {
+        setDraft(event.target.value)
+      }}
+      onBlur={() => {
+        if (draft.trim() !== value) onCommit(draft.trim())
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur()
+      }}
+    />
+  )
+}
+
+/**
+ * The store: what the capture hook has kept, and the way to forget it. It holds other people's
+ * profiles and posts, so clearing it is one click and signing out offers it too.
+ */
+function StoreSection() {
+  const counts = useStoreCounts()
+  const clear = useClearCaptured()
+  const openDownloads = useOpenDownloadsDir()
+  const [confirming, setConfirming] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  const run = (action: () => Promise<unknown>) => {
+    void (async () => {
+      try {
+        await action()
+        setError(null)
+      } catch (err) {
+        setError(humanMessage(err))
+      }
+    })()
+  }
+
+  const people = counts.data?.users ?? 0
+  const posts = counts.data?.posts ?? 0
+
+  return (
+    <Section
+      title="The store"
+      note="What the People and Posts tools work from: the people and posts X loaded into a tab while Twister watched. One SQLite file in the app data directory, and the agent door (twister-mcp) reads the same file."
+    >
+      <Row
+        label={`${people.toLocaleString()} people, ${posts.toLocaleString()} posts`}
+        hint="Grows as you browse and as you scan pages from the tools."
+      >
+        {confirming ? (
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => {
+                run(async () => clear.mutateAsync())
+                setConfirming(false)
+              }}
+            >
+              Forget everything
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setConfirming(false)
+              }}
+            >
+              Keep
+            </Button>
+          </div>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={people + posts === 0}
+            onClick={() => {
+              setConfirming(true)
+            }}
+          >
+            Clear…
+          </Button>
+        )}
+      </Row>
+      <Row label="Downloads" hint="Where the download button saves media: Downloads/Twister.">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            run(async () => openDownloads.mutateAsync())
+          }}
+        >
+          Open folder
+        </Button>
+      </Row>
       {error ? <p className="px-3 py-2 text-xs text-destructive">{error}</p> : null}
     </Section>
   )

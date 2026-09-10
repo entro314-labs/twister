@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-downloads-dir"
+description = "Enables the open_downloads_dir command without any pre-configured scope."
+commands.allow = ["open_downloads_dir"]
+
+[[permission]]
+identifier = "deny-open-downloads-dir"
+description = "Denies the open_downloads_dir command without any pre-configured scope."
+commands.deny = ["open_downloads_dir"]

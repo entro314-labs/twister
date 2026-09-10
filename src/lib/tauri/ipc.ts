@@ -1,7 +1,7 @@
 /**
  * The IPC registry. Every command and event name lives here rather than as a string literal at the
  * call site, so a rename in Rust breaks the build in one place instead of failing silently at
- * runtime. The three `site_*` commands are the bridge's and are not callable from here.
+ * runtime. The `site_*` commands are the bridge's and are not callable from here.
  */
 export const IPC_COMMANDS = {
   getSettings: 'get_settings',
@@ -19,6 +19,24 @@ export const IPC_COMMANDS = {
   reloadSite: 'reload_site',
   showTooltip: 'show_tooltip',
   hideTooltip: 'hide_tooltip',
+  newTab: 'new_tab',
+  closeTab: 'close_tab',
+  activateTab: 'activate_tab',
+  getStoreCounts: 'get_store_counts',
+  listPeople: 'list_people',
+  listPosts: 'list_posts',
+  exportPeople: 'export_people',
+  exportPosts: 'export_posts',
+  clearCaptured: 'clear_captured',
+  startOp: 'start_op',
+  cancelOp: 'cancel_op',
+  getOps: 'get_ops',
+  preparePost: 'prepare_post',
+  postNow: 'post_now',
+  schedulePost: 'schedule_post',
+  listScheduledPosts: 'list_scheduled_posts',
+  deleteScheduledPost: 'delete_scheduled_post',
+  openDownloadsDir: 'open_downloads_dir',
 } as const
 
 export const IPC_EVENTS = {
@@ -28,6 +46,10 @@ export const IPC_EVENTS = {
   notice: 'twister://notice',
   /** The menu asked the shell for something. Payload: `ShellAction`. */
   shell: 'twister://shell',
+  /** The running operation changed. Payload: `Job`. */
+  op: 'twister://op',
+  /** The schedule changed. No payload. */
+  schedule: 'twister://schedule',
 } as const
 
 type ValueOf<T> = T[keyof T]

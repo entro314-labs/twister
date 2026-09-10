@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-site-capture"
+description = "Enables the site_capture command without any pre-configured scope."
+commands.allow = ["site_capture"]
+
+[[permission]]
+identifier = "deny-site-capture"
+description = "Denies the site_capture command without any pre-configured scope."
+commands.deny = ["site_capture"]
