@@ -8,6 +8,60 @@ All notable changes to Twister are documented here. The format follows
 
 ### Added
 
+- **Tabs.** Every tab is an X page in its own webview, sharing the session;
+  only the front one is shown. Arc-style pills in the titlebar,
+  middle-click or ⌘W to close, ⌘T for a new one, Ctrl⇥ / Ctrl⇧⇥ to move
+  between them, popups open as tabs, and the open tabs come back on the next
+  launch. Closing the last tab hides the window, the way a browser does.
+- **The store.** While Twister watches, everything X loads into a tab — the
+  people on a followers or following list, the posts on a timeline, your
+  bookmarks — is read from X's own responses as the page receives them and
+  kept in a local SQLite file. No request is made on X's behalf; nothing
+  leaves the machine. Settings shows the counts and clears it.
+- **People.** A panel beside the island: everyone the store has seen, filtered
+  by words in the bio, where they were seen, whether they follow back, and
+  follower counts; export as CSV, JSON or Markdown; *Scan this page* scrolls
+  the front tab to its end so a whole list is captured; follow or unfollow a
+  selection on the list page that holds them, one every few seconds, dry run
+  by default, stopping at the first thing X refuses.
+- **Posts.** The same for posts: filter by words, kind, author, media and
+  where they were seen — Bookmarks included — export, and delete your own in
+  bulk through X's own menu (reposts undone, likes unliked on the Likes page),
+  dry run by default.
+- **Write.** Markdown in, a thread out: bold, italic and code as styled
+  letters, lists as bullets, `---` as a thread break, and anything over 280
+  split at a sentence, with X's own weighted count per part. Post now types
+  it into X's composer; schedule it and Twister posts it while open, marking
+  it missed rather than sending it hours late.
+- **Downloads.** A button in each post's action bar saves its photos at full
+  size or its video at the best bitrate to Downloads/Twister.
+- **The agent door.** `twister-mcp`, an MCP server over the same store:
+  search people and posts, export, queue a scan, follow, unfollow or delete
+  job the app runs next, and schedule posts. Dry runs unless told otherwise.
+- **Niceties.** *Twitter* in one switch (the bird, the blue, and posts called
+  tweets again in X's own controls and titles); *Fit the timeline*, which lets
+  X's 600px column fill the island and keeps the window wide enough for X's
+  layout, right column included when it shows; *Smooth scrolling*; a font of
+  your choosing for X's text; *Remember what X loads* and *Download button*.
+- **A Tools menu** with ⌘⇧P, ⌘⇧O and ⌘⇧N for People, Posts and Write.
+
+### Changed
+
+- **The macOS traffic lights** sit where macOS puts them again, centred in
+  their band on every version. Twister used to move them itself, which macOS
+  26 quietly stopped honouring vertically — leaving them riding high against
+  the sidebar's header. The window now carries an empty toolbar and lets the
+  system place them; the header band grew to 52px to match, so its title and
+  the lights share one centre line.
+- **The titlebar** is one band: the browser verbs, the tabs — each carrying
+  its page's title — New post as a single icon, and the window controls, with
+  a gutter at either end. All of it moves the window.
+- **Sidebar icons** are a step larger.
+- Bookmarks follows X to `/i/history`.
+- *The bird* became *Twitter*; an old settings file still reads.
+
+### Earlier in this cycle
+
 - **Three niceties.** *Hide the floating drawers* (Grok and Messages in the
   corner); *The bird* (the blue bird for the X mark, classic blue on Post and
   Follow); *Dim*, X's retired blue-grey theme, rebuilt over Lights out by

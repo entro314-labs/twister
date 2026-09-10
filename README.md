@@ -18,13 +18,34 @@ Twister frames it. Nothing you read or write passes through Twister.
 ## What it does
 
 - **A native frame.** Sidebar with the six places you actually go, a titlebar
-  with back / forward / reload and the page title, a status bar that says where
+  with back / forward / reload and the tabs, a status bar that says where
   on X you are and whether it is still loading. macOS overlay titlebar and
   vibrancy, Windows Mica, app-drawn window controls off macOS.
+- **Tabs.** Each tab is an X page in its own webview, sharing the session.
+  ⌘T opens one, ⌘W or a middle-click closes it, Ctrl⇥ moves along; popups
+  open as tabs; the open tabs come back on the next launch.
 - **Shortcuts that work whichever view has focus.** ⌘1–⌘6 for Home, Explore,
   Notifications, Messages, Bookmarks and Profile; ⌘N new post; ⌘[ ⌘] ⌘R;
-  ⌘\ for the sidebar; ⌘, for settings. They are menu accelerators, which is
-  also why ⌘C and ⌘V work at all on macOS.
+  ⌘\ for the sidebar; ⌘⇧P ⌘⇧O ⌘⇧N for the tools; ⌘, for settings. They are
+  menu accelerators, which is also why ⌘C and ⌘V work at all on macOS.
+- **The store, and the tools over it.** While Twister watches, everything X
+  loads into a tab — the people on a list, the posts on a timeline, your
+  bookmarks — is read from X's own responses as the page receives them and
+  kept in a local SQLite file. Nothing is fetched on X's behalf; nothing
+  leaves the machine. Three panels open beside the island:
+  - *People* — filter by bio, source, follow-back status and follower counts;
+    export CSV, JSON or Markdown; scan a list page to its end; follow or
+    unfollow a selection on the page that holds them, one every few seconds,
+    dry run by default, stopping at the first thing X refuses.
+  - *Posts* — the same for posts, bookmarks included; delete your own in
+    bulk through X's own menu, dry run by default.
+  - *Write* — Markdown in, a thread out, with X's weighted count per part;
+    post now through X's composer, or schedule it for while the app is open.
+- **Downloads.** A button in each post's action bar saves its photos at full
+  size or its video at the best bitrate to Downloads/Twister.
+- **The agent door.** `twister-mcp` is an MCP server over the same store:
+  `claude mcp add twister -- /path/to/twister-mcp`. Search, export, queue a
+  scan or a follow run the app performs next, schedule posts.
 - **The niceties**, each a switch in Settings:
   - *Following first* — opens the home timeline on Following, once per visit.
   - *Hide promoted posts.*
@@ -35,8 +56,14 @@ Twister frames it. Nothing you read or write passes through Twister.
   - *Hide X's navigation entirely* — Twister's sidebar carries the same
     destinations.
   - *Hide the floating drawers* — the Grok and Messages panels in the corner.
-  - *The bird* — the blue bird in place of the X mark, and the classic blue on
-    Post and Follow.
+  - *Twitter* — one switch: the blue bird in place of the X mark, the classic
+    blue on Post and Follow, and posts called tweets again in X's own
+    controls and titles (English only).
+  - *Fit the timeline* — X's 600px column grows to fill the island, and the
+    window is kept wide enough for X's layout, right column included when it
+    shows.
+  - *Smooth scrolling*, and a font of your choosing for X's text.
+  - *Remember what X loads* and *Download button on posts*.
   - *Dim* — X's retired blue-grey dark theme, painted over Lights out. Built
     by reading X's own stylesheet for every rule that paints a Lights-out
     colour and shadowing it, so it needs no class names of X's.
@@ -80,34 +107,51 @@ are loaded in place instead and may not complete. Use the password form.
 
 ## How it is built
 
-One window, two child webviews. The **shell** is this app's React page and
-owns the frame. The **site** is x.com, added second so it sits above the shell,
-positioned by Rust from insets the shell measures — so it follows the sidebar
-collapsing and every window resize with no round trip. Anything the shell
+One window, child webviews. The **shell** is this app's React page and owns
+the frame. Each **tab** is x.com in a webview of its own, added after the
+shell so it sits above it, positioned by Rust from insets the shell measures —
+so it follows the sidebar collapsing, a tool panel opening and every window
+resize with no round trip. Only the front tab is shown. Anything the shell
 needs to show over the island (Settings) hides the site first.
 
-The bridge script runs at document start in the site view and can call exactly
-three commands — fetch the niceties, report a navigation, report the signed-in
-handle — granted by a capability scoped to x.com's origin and nothing else.
-Each validates its input, because anything on that page could call it too.
+Three scripts run at document start in every tab: the bridge (niceties,
+navigation, the handle, a layout measurement), the capture hook (X's own API
+responses, read as they arrive, batched to the store) and the operations
+(scan, follow, unfollow, delete, compose — all clicking what X drew and
+reporting progress). Together they may call seven commands, granted by a
+capability scoped to x.com's origin and nothing else, and each validates its
+input, because anything on that page could call it too. Operations run one at
+a time, in the front tab, and every destructive one is a dry run unless told
+otherwise.
 
 ```
 src/                    React 19 + TanStack Router + Tailwind 4
-  components/shell/     sidebar, pane titlebar, status bar, window controls
+  components/shell/     sidebar, titlebar, tab strip, status bar, window controls
+  components/tools/     what the three tool panels share
   components/ui/        Base UI primitives with the house chrome
   lib/tauri/            the IPC contract: command registry, client, types
   lib/query/            TanStack Query hooks and the Rust event bridge
   lib/site-island.ts    keeps the site webview glued to the island
-  routes/               the island (x.com) and settings
+  routes/               the island (x.com), settings, tools/{people,posts,compose}
 src-tauri/src/
-  lib.rs                the window, both webviews, window events
-  site.rs               the site webview: allowlist, title parsing, sections,
-                        layout, the bridge's three commands
+  lib.rs                the window, the webviews, window events
+  site.rs               the tabs: allowlist, title parsing, sections, layout,
+                        the bridge's commands
+  db.rs                 the store: people, posts, jobs, scheduled posts (SQLite)
+  capture.rs            what the page sends the store, and its checks
+  ops.rs                operations: one at a time, in the front tab
+  compose.rs            Markdown to X-shaped text, the weighted count, the split
+  scheduler.rs          due posts and queued jobs, every twenty seconds
+  download.rs           media to Downloads/Twister
+  export.rs             CSV, JSON and Markdown writers
+  mcp.rs, bin/mcp.rs    the agent door
   menu.rs               the application menu and its accelerators
-  settings.rs           preferences and window placement as JSON
+  settings.rs           preferences, window placement and open tabs as JSON
   commands.rs           every Tauri command
 src-tauri/site/
-  bridge.js             the script injected into x.com
+  bridge.js             niceties, navigation, the handle, layout
+  capture.js            the fetch/XHR hook and the download button
+  ops.js                scan, follow, unfollow, delete, compose
   niceties.css          the selectors, gated on attributes the bridge stamps
 src-tauri/capabilities/ what each webview may call
 ```
@@ -125,8 +169,10 @@ from `mise.toml` and `rust-toolchain.toml`.
 
 ## Privacy
 
-Twister stores two small JSON files in your app data directory: preferences and
-window placement. Your X session is a cookie in the site view's own store,
+Twister stores three small JSON files in your app data directory — preferences,
+window placement, open tabs — and one SQLite file, the store: the people and
+posts X loaded into your tabs, kept only when *Remember what X loads* is on and
+cleared from Settings. Your X session is a cookie in the site view's own store,
 which Twister never reads. Sign out in Settings clears that store. The shell's
 content-security policy allows no outbound connections; the only thing that
 talks to X is X.
