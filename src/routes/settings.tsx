@@ -138,6 +138,26 @@ const LOOK: Array<{ key: keyof Niceties; label: string; hint: string }> = [
     label: 'A quieter composer',
     hint: 'The audience chip, the who-can-reply line and Grok go; the count is a number of characters left, from X’s own sum, in place of the ring.',
   },
+  {
+    key: 'hideInlineComposer',
+    label: 'No composer in the timeline',
+    hint: 'The “What is happening?” box at the top of Home goes. New post in the titlebar, or ⌘N, opens the composer as its own sheet.',
+  },
+  {
+    key: 'hidePageHeaders',
+    label: 'Hide X’s page headers',
+    hint: 'The sticky title at the top of the column — Home and its two tabs, the back arrow on a post or a profile. Twister’s titlebar already says where you are. Headers that carry tabs or a search field elsewhere stay; the new-posts pill on Home stays. Turn on Following first too, or Home stays on For you.',
+  },
+  {
+    key: 'hideTimelineModules',
+    label: 'Only posts in the timeline',
+    hint: 'No “Who to follow”, “Discover more”, news or premium blocks between posts on Home, profiles, lists and bookmarks. Under a post, “Discover more” and everything after it goes.',
+  },
+  {
+    key: 'timeOnRight',
+    label: 'Time on the right',
+    hint: 'The post’s age sits at the far right of the byline, the dot before it gone. The post on its own page keeps X’s layout.',
+  },
 ]
 
 const SHORTCUTS: Array<{ keys: string; does: string }> = [

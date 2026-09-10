@@ -38,6 +38,10 @@
     hideActionCounts: 'data-twister-hide-action-counts',
     starFavorites: 'data-twister-star',
     compactCompose: 'data-twister-compact-compose',
+    hideInlineComposer: 'data-twister-hide-composer',
+    hidePageHeaders: 'data-twister-hide-headers',
+    hideTimelineModules: 'data-twister-hide-modules',
+    timeOnRight: 'data-twister-time-right',
   }
 
   function installSheet(name, css) {
@@ -71,11 +75,58 @@
   }
 
   // Messages is the one place the right column must stay: it is the
-  // conversation. The route is stamped so the CSS can make the exception.
+  // conversation. The route is stamped so the CSS can make the exception;
+  // Home is stamped so its header, tabs and all, can be the one that goes.
   const CHAT_ROUTE = /^\/(?:i\/chat|messages)(?:\/|$)/
   function stampRoute() {
     const root = document.documentElement
-    if (root) root.toggleAttribute('data-twister-chat', CHAT_ROUTE.test(location.pathname))
+    if (!root) return
+    root.toggleAttribute('data-twister-chat', CHAT_ROUTE.test(location.pathname))
+    root.toggleAttribute('data-twister-home', location.pathname === '/home')
+  }
+
+  // ── Modules ───────────────────────────────────────────────────────────────
+  // What X puts between posts: "Who to follow", "Discover more", news,
+  // premium prompts. A timeline is a list of cells; a module is a heading
+  // cell and the cells after it that hold no post, or a prompt cell, or a
+  // person cell. Under a post, "Discover more" — a heading with a line of
+  // description beside it — is where the conversation ends and X's
+  // suggestions begin, so everything after it goes too. Only on the pages
+  // that are timelines of posts: search and notifications keep theirs.
+  const TIMELINE = '[data-testid="primaryColumn"] section > h1 + div[aria-label] > div'
+  const MODULE_ROUTE = /^\/(?:home|i\/(?:bookmarks|history|lists\/\d+)|[A-Za-z0-9_]{1,15}(?:\/(?:with_replies|highlights|media|likes|status\/\d+))?)\/?$/
+  // Reserved paths a handle's shape would otherwise match.
+  const NOT_A_PROFILE = /^\/(?:home|explore|notifications|search|messages|settings|compose|jobs|business|login|signup|about|privacy|tos)(?:\/|$)/
+  const MODULE_CELL = '[data-testid="inlinePrompt"], [data-testid="UserCell"], a[href^="/i/premium"]'
+  function isModuleRoute(path) {
+    return path === '/home' || (MODULE_ROUTE.test(path) && !NOT_A_PROFILE.test(path))
+  }
+  function markModules() {
+    if (!niceties.hideTimelineModules || !isModuleRoute(location.pathname)) return
+    // Only under a post does a described heading end the conversation;
+    // on Home a heading is one module, and the posts after it are posts.
+    const underPost = /\/status\/\d+/.test(location.pathname)
+    for (const timeline of document.querySelectorAll(TIMELINE)) {
+      let inModule = false
+      let afterDiscover = false
+      for (const item of timeline.children) {
+        let hide = afterDiscover
+        if (!hide) {
+          const heading = item.querySelector('h2[role="heading"]')
+          if (item.querySelector('article')) {
+            inModule = false
+          } else if (heading) {
+            const described = heading.nextElementSibling
+            afterDiscover = underPost && Boolean(described && described.tagName === 'DIV' && described.hasAttribute('dir'))
+            inModule = true
+            hide = true
+          } else if (item.querySelector(MODULE_CELL) || inModule) {
+            hide = true
+          }
+        }
+        item.toggleAttribute('data-twister-module', hide)
+      }
+    }
   }
 
   // ── Marking ───────────────────────────────────────────────────────────────
@@ -560,6 +611,7 @@
       settleHome()
       markPromoted()
       markGrok()
+      markModules()
       swapBird()
       swapStar()
       paintCount()
@@ -577,6 +629,8 @@
     settleHome()
     markPromoted()
     markGrok()
+    if (!niceties.hideTimelineModules) for (const cell of document.querySelectorAll('[data-twister-module]')) cell.removeAttribute('data-twister-module')
+    markModules()
     swapBird()
     swapStar()
     paintCount()

@@ -98,7 +98,13 @@ what each thread would have cost. The numbers live in `src/lib/api-costs.ts`.
   *No counts on the action bar*; *Stars, not hearts* (a gold star for the
   like button, and likes called favorites in X's controls); *A quieter
   composer* (no audience chip, no who-can-reply line, no Grok, and a number
-  of characters left — from X's own count — in place of the ring).
+  of characters left — from X's own count — in place of the ring); *No
+  composer in the timeline*; *Hide X's page headers* (the sticky title band —
+  Home and its two tabs, the back arrow on a post — while headers that carry
+  tabs or a search field elsewhere stay, and so does the new-posts pill);
+  *Only posts in the timeline* (no "Who to follow", "Discover more", news or
+  premium blocks on Home, profiles, lists and bookmarks; under a post,
+  "Discover more" and all after it); *Time on the right* of the byline.
   - *Remember what X loads* and *Download button on posts*.
   - *Dim* — X's retired blue-grey dark theme, painted over Lights out. Built
     by reading X's own stylesheet for every rule that paints a Lights-out

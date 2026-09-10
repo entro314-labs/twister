@@ -28,6 +28,10 @@ export interface Niceties {
   hideActionCounts: boolean
   starFavorites: boolean
   compactCompose: boolean
+  hideInlineComposer: boolean
+  hidePageHeaders: boolean
+  hideTimelineModules: boolean
+  timeOnRight: boolean
 }
 
 /** `settings::Settings` */

@@ -53,7 +53,14 @@ All notable changes to Twister are documented here. The format follows
   hearts* — a gold star for the like button, and likes called favorites in
   X's own controls; *A quieter composer* — the audience chip, the
   who-can-reply line and Grok go, and the count is a number of characters
-  left, taken from X's own progress ring, in place of the ring.
+  left, counted by the same rule as the Write panel, in place of the ring;
+  *No composer in the timeline*; *Hide X's page headers* — the sticky title
+  band, Home's two tabs included, while headers that carry tabs or a search
+  field elsewhere stay and the new-posts pill is left standing; *Only posts
+  in the timeline* — "Who to follow", "Discover more", news and premium
+  blocks go on Home, profiles, lists and bookmarks, and under a post
+  "Discover more" takes everything after it; *Time on the right* of the
+  byline, the dot before it gone.
 - **What the API would charge.** A table in Settings of what X's pay-per-use
   card bills for each thing a classic client did — timeline, threads,
   profiles, search, mentions, messages, posts, bookmarks — with an ordinary

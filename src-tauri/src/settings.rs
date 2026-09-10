@@ -145,6 +145,18 @@ pub struct Niceties {
     /// A quieter composer: no audience or reply-permission chrome, no Grok,
     /// and a number for the character count in place of X's ring.
     pub compact_compose: bool,
+    /// No "What is happening?" box at the top of the home timeline; the
+    /// composer is a window of its own, as it was in a client.
+    pub hide_inline_composer: bool,
+    /// Drop X's sticky page headers — the Home title and its two tabs, the
+    /// back arrow and title on a post or a profile. Headers that carry tabs
+    /// or a search field elsewhere stay.
+    pub hide_page_headers: bool,
+    /// Only posts in a timeline: no "Who to follow", "Discover more", news
+    /// or premium modules between them.
+    pub hide_timeline_modules: bool,
+    /// The time on the far right of the byline, the dot before it gone.
+    pub time_on_right: bool,
 }
 
 impl Default for Niceties {
@@ -170,6 +182,10 @@ impl Default for Niceties {
             hide_action_counts: false,
             star_favorites: false,
             compact_compose: false,
+            hide_inline_composer: false,
+            hide_page_headers: false,
+            hide_timeline_modules: false,
+            time_on_right: false,
         }
     }
 }
@@ -310,13 +326,18 @@ mod tests {
         assert!(!parsed.niceties.hide_action_counts);
         assert!(!parsed.niceties.star_favorites);
         assert!(!parsed.niceties.compact_compose);
+        assert!(!parsed.niceties.hide_inline_composer);
+        assert!(!parsed.niceties.hide_page_headers);
+        assert!(!parsed.niceties.hide_timeline_modules);
+        assert!(!parsed.niceties.time_on_right);
         assert_eq!(parsed.text_size, "normal");
         let parsed: Settings = serde_json::from_str(
-            r#"{"textSize":"large","niceties":{"compactPosts":true,"starFavorites":true}}"#,
+            r#"{"textSize":"large","niceties":{"compactPosts":true,"starFavorites":true,"hideTimelineModules":true}}"#,
         )
         .expect("parses");
         assert!(parsed.niceties.compact_posts);
         assert!(parsed.niceties.star_favorites);
+        assert!(parsed.niceties.hide_timeline_modules);
         assert!(!parsed.niceties.square_avatars);
         assert_eq!(parsed.text_size, "large");
         assert!(parsed.validate().is_ok());

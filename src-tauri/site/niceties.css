@@ -265,3 +265,53 @@ html[data-twister-compact-compose] [data-twister-ring] {
   color: rgb(244, 33, 46);
   font-weight: 700;
 }
+
+/* No composer in the timeline: the block at the top of the home column that
+   holds a text area and no posts. The composer sheet lives in another
+   layer and is untouched. */
+html[data-twister-hide-composer] [data-testid="primaryColumn"] > div > div:has([data-testid^="tweetTextarea_"]):not(:has([data-testid="cellInnerDiv"])) {
+  display: none !important;
+}
+
+/* X's page headers: the sticky band at the top of the column. On Home it
+   goes whole, tabs and all — Following first has already chosen. Elsewhere
+   only a header with nothing but a title and a back arrow goes; one that
+   carries tabs (Notifications, a profile) or a search field (Explore)
+   stays, and Messages keeps its own. The new-posts pill on Home is a child
+   of the same band, placed by a transform, and is left standing. */
+html[data-twister-hide-headers][data-twister-home] [data-testid="primaryColumn"] > div > div:first-of-type,
+html[data-twister-hide-headers]:not([data-twister-chat]) [data-testid="primaryColumn"] > div > div:first-of-type:not(:has([role="tablist"], [data-testid="SearchBox_Search_Input"], form)) {
+  height: 0 !important;
+  min-height: 0 !important;
+  border: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+}
+html[data-twister-hide-headers][data-twister-home] [data-testid="primaryColumn"] > div > div:first-of-type > :not([style^="transform"]),
+html[data-twister-hide-headers]:not([data-twister-chat]) [data-testid="primaryColumn"] > div > div:first-of-type:not(:has([role="tablist"], [data-testid="SearchBox_Search_Input"], form)) > :not([style^="transform"]) {
+  display: none !important;
+}
+
+/* Only posts in the timeline: the cells the bridge marked as modules. */
+html[data-twister-hide-modules] [data-twister-module] {
+  display: none !important;
+}
+
+/* Time on the right: the byline's second half is handle, dot, time; the
+   half is stretched, the dot dropped, the time pushed to the far end. The
+   focal post lays its byline out differently and keeps X's. */
+html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"] {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"] > div:last-child:not(:first-child) {
+  flex: 1 1 auto !important;
+}
+html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"] > div:last-child:not(:first-child) > div:nth-child(2):not(:last-child) {
+  display: none !important;
+}
+html[data-twister-time-right] article[data-testid="tweet"]:not([tabindex="-1"]) [data-testid="User-Name"] > div:last-child:not(:first-child) > div:last-child:not(:first-child) {
+  margin-left: auto !important;
+  padding-left: 8px !important;
+}
