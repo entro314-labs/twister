@@ -13,9 +13,16 @@
 #                                the PUBLIC repo the updater endpoints in
 #                                src-tauri/src/update.rs point at.
 #
-# The releases repo has to exist before the first tag: the in-app updater polls
-# it for every channel, and the reachability probe in update.rs reports it as
-# unreachable — loudly, and correctly — until it does.
+# entro314-labs/twister-releases is public and exists; until a release is
+# published on a channel the in-app updater reports the calm "nothing published
+# yet" state rather than a broken pipeline (update.rs tells the two apart by
+# probing the repo itself).
+#
+# No macos_arm_runner / macos_intel_runner overrides here, unlike meltemi and
+# anasa: this repo is PUBLIC, its workflows run for fork PRs, and a self-hosted
+# label would run a stranger's code on a personal Mac. Public repos get free
+# Actions minutes anyway, so the 10x macOS billing those overrides dodge does
+# not apply.
 name: Release
 
 on:

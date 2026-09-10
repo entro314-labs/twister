@@ -249,11 +249,18 @@ async fn check(
         // pending.
         Err(tauri_plugin_updater::Error::ReleaseNotFound) => {
             if releases_repo_reachable().await {
+                log::info!(
+                    "no release on the {} channel yet ({RELEASES_REPO_URL} answered)",
+                    channel.name()
+                );
                 Err(AppError::NoRelease(format!(
                     "No release has been published on the {} channel yet.",
                     channel.name()
                 )))
             } else {
+                log::warn!(
+                    "{RELEASES_REPO_URL} did not answer; the update pipeline is unreachable"
+                );
                 Err(AppError::UpdateSourceUnreachable(format!(
                     "{RELEASES_REPO_URL} did not answer."
                 )))
