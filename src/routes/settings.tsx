@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
 import { Select } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { CLIENT_ACTIONS, RATE_CARD_CHECKED, SELF_SERVE_CUT, dayCost, usd } from '@/lib/api-costs'
 import { MOD_KEY } from '@/lib/chrome'
 import {
   useClearCaptured,
@@ -102,6 +103,43 @@ const NICETIES: Array<{ key: keyof Niceties; label: string; hint: string }> = [
   },
 ]
 
+/**
+ * The look: posts and the composer drawn the way a classic client drew them. The same contract as
+ * the niceties — one selector each, one switch each.
+ */
+const LOOK: Array<{ key: keyof Niceties; label: string; hint: string }> = [
+  {
+    key: 'compactPosts',
+    label: 'Compact posts',
+    hint: 'A 32px avatar, a smaller byline, and the action bar pulled up under the text.',
+  },
+  {
+    key: 'squareAvatars',
+    label: 'Rounded-square avatars',
+    hint: 'Squares with soft corners in place of circles, everywhere X draws one.',
+  },
+  {
+    key: 'actionsOnHover',
+    label: 'Actions on hover',
+    hint: 'A post’s reply, repost, like and share buttons show only while the post is under the pointer or has focus. The post on its own page keeps them.',
+  },
+  {
+    key: 'hideActionCounts',
+    label: 'No counts on the action bar',
+    hint: 'The numbers beside reply, repost and like go; the post’s own page still has them.',
+  },
+  {
+    key: 'starFavorites',
+    label: 'Stars, not hearts',
+    hint: 'A star for the like button, gold when lit, and likes called favorites in X’s own controls (English only).',
+  },
+  {
+    key: 'compactCompose',
+    label: 'A quieter composer',
+    hint: 'The audience chip, the who-can-reply line and Grok go; the count is a number of characters left, from X’s own sum, in place of the ring.',
+  },
+]
+
 const SHORTCUTS: Array<{ keys: string; does: string }> = [
   {
     keys: `${MOD_KEY}1 – ${MOD_KEY}6`,
@@ -179,6 +217,12 @@ function SettingsScreen() {
             <option value="strong">Strong</option>
           </Select>
         </Row>
+      </Section>
+
+      <Section
+        title="The look"
+        note="Posts and the composer the way a classic client drew them. Selectors on X’s page, like the niceties: one that stops matching does nothing until it is fixed."
+      >
         <Row
           label="Font on X"
           hint="A font family for X’s text, as CSS would name it — “Inter”, “Georgia, serif”. Empty keeps X’s own."
@@ -192,6 +236,29 @@ function SettingsScreen() {
             }}
           />
         </Row>
+        <Row label="Text size" hint="The size of a post’s text. Normal is X’s own.">
+          <Select
+            value={current.textSize}
+            onChange={(event) => {
+              patch({ textSize: event.target.value as Settings['textSize'] })
+            }}
+            className="w-36"
+          >
+            <option value="small">Small</option>
+            <option value="normal">Normal</option>
+            <option value="large">Large</option>
+          </Select>
+        </Row>
+        {LOOK.map((item) => (
+          <Row key={item.key} label={item.label} hint={item.hint}>
+            <Switch
+              checked={current.niceties[item.key]}
+              onCheckedChange={(checked) => {
+                patch({ niceties: { ...current.niceties, [item.key]: checked } })
+              }}
+            />
+          </Row>
+        ))}
       </Section>
 
       <Section
@@ -224,8 +291,90 @@ function SettingsScreen() {
         ))}
       </Section>
 
+      <ApiCostsSection />
+
       <AboutSection />
     </div>
+  )
+}
+
+/**
+ * The bill Twister does not run up: what X's API charges for each thing a classic client did, and
+ * what a day of it comes to. A reference, from X's own card, so "the API costs money" is a number.
+ */
+function ApiCostsSection() {
+  const day = dayCost()
+  const checked = new Date(`${RATE_CARD_CHECKED}T00:00:00`).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+  const cut = new Date(`${SELF_SERVE_CUT}T00:00:00`).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+  return (
+    <Section
+      title="What the API would charge"
+      note="Twister makes no API calls: the island is X's own site. This is what X's pay-per-use card charges for each thing a classic client did, and what an ordinary day of it comes to."
+    >
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-[11px] text-muted-foreground">
+              <th className="px-3 py-2 font-medium">You</th>
+              <th className="px-3 py-2 font-medium">X’s card</th>
+              <th className="px-3 py-2 text-right font-medium">A day</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/50">
+            {CLIENT_ACTIONS.map((action) => (
+              <tr key={action.does}>
+                <td className="px-3 py-1.5">{action.does}</td>
+                <td className="px-3 py-1.5 text-muted-foreground">
+                  {action.row}
+                  {action.usd !== null && action.unit ? (
+                    <span className="tabular-nums">
+                      {' '}
+                      · {usd(action.usd)} a {action.unit}
+                    </span>
+                  ) : null}
+                </td>
+                <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums">
+                  {action.usd === null ? (
+                    <span className="text-muted-foreground">
+                      {action.perDay} {action.each} · —
+                    </span>
+                  ) : (
+                    <>
+                      <span className="text-muted-foreground">
+                        {action.perDay} {action.each} ·{' '}
+                      </span>
+                      {usd(action.usd * action.perDay)}
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-baseline justify-between gap-3 px-3 py-2.5 text-sm">
+        <span>
+          {usd(day.usd)} a day, about {usd(day.usd * 30)} a month, before{' '}
+          {day.unpriced.map((name) => name.toLowerCase()).join(', ')}.
+        </span>
+        <span className="shrink-0 font-medium text-success">Twister: $0</span>
+      </div>
+      <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+        Read off docs.x.com on {checked}; the card has moved twice this year. Reads bill per
+        resource returned and are charged once per UTC day, so the counts are distinct posts and
+        people rather than scrolls. Likes, follows and quote posts left every self-serve tier on{' '}
+        {cut}; reposts and deletes have no row of their own. The card caps a month at three million
+        post reads.
+      </p>
+    </Section>
   )
 }
 

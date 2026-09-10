@@ -44,6 +44,23 @@ All notable changes to Twister are documented here. The format follows
   layout, right column included when it shows; *Smooth scrolling*; a font of
   your choosing for X's text; *Remember what X loads* and *Download button*.
 - **A Tools menu** with ⌘⇧P, ⌘⇧O and ⌘⇧N for People, Posts and Write.
+- **The look.** A section in Settings for those who miss a classic client,
+  each its own switch: a text size for posts; *Compact posts* — a 32px
+  avatar, a quieter byline, the action bar pulled up under the text;
+  *Rounded-square avatars*; *Actions on hover* — a post's action bar shows
+  for the pointer or the keyboard and stays out of the way otherwise, the
+  post on its own page excepted; *No counts on the action bar*; *Stars, not
+  hearts* — a gold star for the like button, and likes called favorites in
+  X's own controls; *A quieter composer* — the audience chip, the
+  who-can-reply line and Grok go, and the count is a number of characters
+  left, taken from X's own progress ring, in place of the ring.
+- **What the API would charge.** A table in Settings of what X's pay-per-use
+  card bills for each thing a classic client did — timeline, threads,
+  profiles, search, mentions, messages, posts, bookmarks — with an ordinary
+  day's arithmetic against Twister's $0, and a note of what the card no
+  longer sells to individuals (likes, follows, quote posts, since April 2026).
+  The Write panel says what each thread would have cost, a link counted at
+  its own rate.
 
 ### Changed
 

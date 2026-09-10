@@ -156,3 +156,112 @@ html[data-twister-dim] [style*="border-color: rgb(47, 51, 54)"] {
 html[data-twister-hide-site-nav] header[role="banner"] {
   display: none !important;
 }
+
+/* ─── The look ──────────────────────────────────────────────────────────────
+   Posts and the composer drawn the way a classic client drew them. Each rule
+   is gated on its own switch, so the one X breaks next can be turned off on
+   its own. Sizes are X's own values, reduced; nothing here depends on a class
+   name of X's. */
+
+/* Text size: X draws a post's text at 15px in a timeline and 17px on its own
+   page. Small and large step each by two. */
+html[data-twister-text-size="small"] [data-testid="tweetText"] {
+  font-size: 13px !important;
+  line-height: 18px !important;
+}
+html[data-twister-text-size="large"] [data-testid="tweetText"] {
+  font-size: 17px !important;
+  line-height: 23px !important;
+}
+html[data-twister-text-size="large"] article[tabindex="-1"] [data-testid="tweetText"] {
+  font-size: 19px !important;
+  line-height: 26px !important;
+}
+
+/* Compact posts: a tighter row, a 32px avatar in place of 40, the byline a
+   step smaller, the action bar pulled up under the text. X sizes the avatar
+   with an inline width on a box whose height follows from it, so only the
+   width is changed. */
+html[data-twister-compact] article[data-testid="tweet"] [data-testid="Tweet-User-Avatar"] {
+  width: 32px !important;
+}
+html[data-twister-compact] article[data-testid="tweet"] [data-testid="Tweet-User-Avatar"] [data-testid^="UserAvatar-Container-"][style*="width: 40px"] {
+  width: 32px !important;
+  height: 32px !important;
+}
+html[data-twister-compact] article[data-testid="tweet"] [data-testid="User-Name"] span {
+  font-size: 14px !important;
+  line-height: 18px !important;
+}
+html[data-twister-compact] article[data-testid="tweet"]:not([tabindex="-1"]) [role="group"] {
+  margin-top: 2px !important;
+  height: 28px !important;
+}
+html[data-twister-compact] article[data-testid="tweet"]:not([tabindex="-1"]) [role="group"] svg {
+  width: 17px !important;
+  height: 17px !important;
+}
+html[data-twister-compact] article[data-testid="tweet"] [data-testid="socialContext"] {
+  font-size: 12px !important;
+  line-height: 15px !important;
+}
+
+/* Rounded-square avatars, everywhere X draws one: the container carries the
+   user's id in its test id, and every box under it is a circle to undo. */
+html[data-twister-square] [data-testid^="UserAvatar-Container-"],
+html[data-twister-square] [data-testid^="UserAvatar-Container-"] * {
+  border-radius: 6px !important;
+}
+
+/* Actions on hover: a post's action bar is there for the pointer or the
+   keyboard, and out of the way the rest of the time. The focal post on its
+   own page keeps its bar. */
+html[data-twister-actions-hover] article[data-testid="tweet"]:not([tabindex="-1"]) [role="group"] {
+  transition: opacity 0.12s ease-out;
+}
+html[data-twister-actions-hover] article[data-testid="tweet"]:not([tabindex="-1"]):not(:hover):not(:focus-within) [role="group"] {
+  opacity: 0;
+}
+
+/* No counts on the action bar: the number beside each verb. Views have a
+   switch of their own. */
+html[data-twister-hide-action-counts] article[data-testid="tweet"] [role="group"] [data-testid="app-text-transition-container"] {
+  display: none !important;
+}
+
+/* Stars: the glyph is swapped by the bridge; the colour is the classic gold,
+   in place of X's pink, lit or hovered. */
+html[data-twister-star] [data-testid="unlike"],
+html[data-twister-star] [data-testid="unlike"] *,
+html[data-twister-star] [data-testid="like"]:hover,
+html[data-twister-star] [data-testid="like"]:hover * {
+  color: rgb(255, 173, 31) !important;
+}
+html[data-twister-star] [data-testid="like"]:hover [role="presentation"],
+html[data-twister-star] [data-testid="unlike"]:hover [role="presentation"] {
+  background-color: rgba(255, 173, 31, 0.12) !important;
+}
+
+/* A quieter composer: the audience chip and the reply-permission line go,
+   Grok goes, and X's progress ring gives way to a number the bridge keeps
+   next to where the ring was. */
+html[data-twister-compact-compose] [aria-label^="Choose audience"],
+html[data-twister-compact-compose] [role="button"][aria-label*="can reply"],
+html[data-twister-compact-compose] [data-testid="toolBar"] [data-testid="grokImgGen"],
+html[data-twister-compact-compose] [data-twister-ring] {
+  display: none !important;
+}
+[data-twister-count] {
+  align-self: center;
+  margin-right: 10px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: rgb(113, 118, 123);
+}
+[data-twister-count][data-near] {
+  color: rgb(255, 173, 31);
+}
+[data-twister-count][data-over] {
+  color: rgb(244, 33, 46);
+  font-weight: 700;
+}

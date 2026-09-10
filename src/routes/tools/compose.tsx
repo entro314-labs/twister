@@ -5,6 +5,7 @@ import * as React from 'react'
 import { ErrorLine, Field, Panel, Section, useRun } from '@/components/tools/panel'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
+import { partCost, usd } from '@/lib/api-costs'
 import {
   useDeleteScheduledPost,
   useOps,
@@ -84,6 +85,9 @@ function ComposeScreen() {
   const busy = Boolean(ops.data?.running)
   const signedIn = Boolean(site.data?.handle)
   const empty = parts.length === 0
+  // What X's API would bill for this, part by part: a link changes the row.
+  const apiCost = parts.reduce((sum, part) => sum + partCost(part.hasLink), 0)
+  const linked = parts.filter((part) => part.hasLink).length
 
   return (
     <Panel
@@ -134,6 +138,15 @@ function ComposeScreen() {
           Styled letters are Unicode look-alikes: they read as bold on X and as gibberish to a
           screen reader. Use them sparingly.
         </p>
+        {empty ? null : (
+          <p className="text-[11px] leading-relaxed text-muted-foreground tabular-nums">
+            Through X’s API this would cost {usd(apiCost)}
+            {linked > 0
+              ? ` — ${usd(linked * partCost(true))} of it for the ${linked === 1 ? 'link' : 'links'}`
+              : ''}
+            . Through X’s composer, nothing.
+          </p>
+        )}
       </Section>
 
       <Section title="Send">

@@ -393,6 +393,7 @@ fn prefs(app: &AppHandle) -> SitePrefs {
         |_| SitePrefs {
             niceties: crate::settings::Niceties::default(),
             font: String::new(),
+            text_size: "normal".into(),
         },
         |p| p.clone(),
     )
@@ -1197,6 +1198,7 @@ mod tests {
         let prefs = SitePrefs {
             niceties: crate::settings::Niceties::default(),
             font: "Inter".into(),
+            text_size: "normal".into(),
         };
         let script = init_script(
             &prefs,

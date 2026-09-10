@@ -22,6 +22,9 @@ const URL_WEIGHT: usize = 23;
 pub struct Part {
     pub text: String,
     pub count: usize,
+    /// Whether X would link something in it — a post with a URL is billed
+    /// differently through the API, which the Write panel says.
+    pub has_link: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -314,6 +317,7 @@ pub fn prepare(markdown: &str) -> Prepared {
         .into_iter()
         .map(|text| Part {
             count: count(&text),
+            has_link: !url_spans(&text).is_empty(),
             text,
         })
         .collect();
@@ -399,5 +403,13 @@ mod tests {
         assert_eq!(prepared.parts[1].text, "again");
         assert_eq!(prepared.limit, 280);
         assert!(prepare("   \n\n").parts.is_empty());
+    }
+
+    #[test]
+    fn a_part_knows_whether_x_would_link_something_in_it() {
+        let prepared =
+            prepare("plain words\n---\nsee https://example.com/x\n---\nask me@example.com");
+        let links: Vec<bool> = prepared.parts.iter().map(|p| p.has_link).collect();
+        assert_eq!(links, vec![false, true, false]);
     }
 }

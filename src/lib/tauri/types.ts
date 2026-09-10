@@ -22,6 +22,12 @@ export interface Niceties {
   downloadButton: boolean
   fitTimeline: boolean
   smoothScroll: boolean
+  compactPosts: boolean
+  squareAvatars: boolean
+  actionsOnHover: boolean
+  hideActionCounts: boolean
+  starFavorites: boolean
+  compactCompose: boolean
 }
 
 /** `settings::Settings` */
@@ -31,6 +37,8 @@ export interface Settings {
   niceties: Niceties
   /** A CSS font-family for X's text, or empty for X's own. */
   font: string
+  /** The size of a post's text. */
+  textSize: 'small' | 'normal' | 'large'
 }
 
 /** `site::Section` — where on X a tab currently is. */
@@ -245,6 +253,8 @@ export interface OpsState {
 export interface PostPart {
   text: string
   count: number
+  /** X would link something in it, which the API bills at its own rate. */
+  hasLink: boolean
 }
 
 /** `compose::Prepared` */

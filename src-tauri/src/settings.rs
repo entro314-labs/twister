@@ -24,6 +24,8 @@ pub struct Settings {
     pub niceties: Niceties,
     /// A CSS font-family for X's text, or empty for X's own.
     pub font: String,
+    /// `small` | `normal` | `large` — the size of a post's text.
+    pub text_size: String,
 }
 
 impl Default for Settings {
@@ -33,17 +35,20 @@ impl Default for Settings {
             window_material: "standard".into(),
             niceties: Niceties::default(),
             font: String::new(),
+            text_size: "normal".into(),
         }
     }
 }
 
-/// What the bridge receives: the switches plus the font, as one object.
+/// What the bridge receives: the switches, the font and the text size, as
+/// one object.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SitePrefs {
     #[serde(flatten)]
     pub niceties: Niceties,
     pub font: String,
+    pub text_size: String,
 }
 
 impl Settings {
@@ -51,6 +56,7 @@ impl Settings {
         SitePrefs {
             niceties: self.niceties,
             font: self.font.clone(),
+            text_size: self.text_size.clone(),
         }
     }
 }
@@ -74,6 +80,12 @@ impl Settings {
         // business carrying anything that could close the declaration.
         if self.font.len() > 120 || self.font.contains([';', '{', '}', '<', '>', '\\', '/']) {
             return Err(AppError::InvalidInput("That is not a font family.".into()));
+        }
+        if !matches!(self.text_size.as_str(), "small" | "normal" | "large") {
+            return Err(AppError::InvalidInput(format!(
+                "Unknown text size `{}`.",
+                self.text_size
+            )));
         }
         Ok(())
     }
@@ -119,6 +131,20 @@ pub struct Niceties {
     pub fit_timeline: bool,
     /// Animated scrolling on keyboard and programmatic jumps.
     pub smooth_scroll: bool,
+    /// Posts drawn the way a classic client drew them: a smaller avatar, a
+    /// quieter byline, the action bar pulled up under the text.
+    pub compact_posts: bool,
+    /// Rounded-square avatars in place of circles.
+    pub square_avatars: bool,
+    /// A post's action bar shows only while the post is hovered or focused.
+    pub actions_on_hover: bool,
+    /// No reply, repost or like counts on the action bar.
+    pub hide_action_counts: bool,
+    /// A star in place of the heart, gold when lit.
+    pub star_favorites: bool,
+    /// A quieter composer: no audience or reply-permission chrome, no Grok,
+    /// and a number for the character count in place of X's ring.
+    pub compact_compose: bool,
 }
 
 impl Default for Niceties {
@@ -138,6 +164,12 @@ impl Default for Niceties {
             download_button: true,
             fit_timeline: true,
             smooth_scroll: false,
+            compact_posts: false,
+            square_avatars: false,
+            actions_on_hover: false,
+            hide_action_counts: false,
+            star_favorites: false,
+            compact_compose: false,
         }
     }
 }
@@ -265,6 +297,29 @@ mod tests {
         let prefs = serde_json::to_value(parsed.site_prefs()).expect("json");
         assert_eq!(prefs["classicTwitter"], true);
         assert_eq!(prefs["font"], "");
+        assert_eq!(prefs["textSize"], "normal");
+        assert_eq!(prefs["starFavorites"], false);
+    }
+
+    #[test]
+    fn the_look_switches_default_off_and_read_back() {
+        let parsed: Settings = serde_json::from_str("{}").expect("parses");
+        assert!(!parsed.niceties.compact_posts);
+        assert!(!parsed.niceties.square_avatars);
+        assert!(!parsed.niceties.actions_on_hover);
+        assert!(!parsed.niceties.hide_action_counts);
+        assert!(!parsed.niceties.star_favorites);
+        assert!(!parsed.niceties.compact_compose);
+        assert_eq!(parsed.text_size, "normal");
+        let parsed: Settings = serde_json::from_str(
+            r#"{"textSize":"large","niceties":{"compactPosts":true,"starFavorites":true}}"#,
+        )
+        .expect("parses");
+        assert!(parsed.niceties.compact_posts);
+        assert!(parsed.niceties.star_favorites);
+        assert!(!parsed.niceties.square_avatars);
+        assert_eq!(parsed.text_size, "large");
+        assert!(parsed.validate().is_ok());
     }
 
     #[test]
@@ -291,6 +346,10 @@ mod tests {
         settings.window_material = "frosted".into();
         assert!(settings.validate().is_err());
         settings.window_material = "off".into();
+        assert!(settings.validate().is_ok());
+        settings.text_size = "huge".into();
+        assert!(settings.validate().is_err());
+        settings.text_size = "small".into();
         assert!(settings.validate().is_ok());
     }
 

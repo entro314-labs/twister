@@ -15,6 +15,34 @@ cost its user money on every scroll. So Twister does not touch the API at all.
 The page in the island is X's own site, signed in with X's own session, and
 Twister frames it. Nothing you read or write passes through Twister.
 
+What that saves, from X's own card (read off docs.x.com on 2026-09-10; it has
+moved twice this year):
+
+| What a classic client did          | X's card                    | Price              |
+| ---------------------------------- | --------------------------- | ------------------ |
+| Refresh the home timeline          | Posts: Read                 | $0.005 a post      |
+| Open a post and its replies        | Posts: Read                 | $0.005 a post      |
+| Open a profile                     | User: Read                  | $0.010 a profile   |
+| Someone else's followers/following | Following/Followers: Read   | $0.010 a person    |
+| Search                             | Posts: Read                 | $0.005 a post      |
+| Mentions, your own posts, bookmarks| Owned read                  | $0.001 a resource  |
+| Read direct messages               | DM Event: Read              | $0.010 a message   |
+| Send a direct message              | DM Interaction: Create      | $0.015 a message   |
+| Post or reply                      | Post: Create                | $0.015 a post      |
+| Post with a link in it             | Post: Create (with URL)     | $0.200 a post      |
+| Bookmark                           | Bookmark                    | $0.005 a request   |
+| Like, quote, follow, unfollow      | Enterprise only since 2026-04-20 | —             |
+| Repost, delete                     | Not named on the card       | —                  |
+
+Reads are billed per resource returned and deduplicated within one UTC day; a
+month is capped at three million post reads. An ordinary day of reading — a
+few hundred distinct timeline posts, a handful of profiles and threads, some
+search, the mentions, a few messages and posts — comes to about $3.50, or a
+little over $100 a month, before the likes and follows the API no longer
+sells to individuals.
+Settings shows the same table with the day's arithmetic; the Write panel says
+what each thread would have cost. The numbers live in `src/lib/api-costs.ts`.
+
 ## What it does
 
 - **A native frame.** Sidebar with the six places you actually go, a titlebar
@@ -63,6 +91,14 @@ Twister frames it. Nothing you read or write passes through Twister.
     window is kept wide enough for X's layout, right column included when it
     shows.
   - *Smooth scrolling*, and a font of your choosing for X's text.
+- **The look**, for those who miss a classic client, each its own switch:
+  a text size; *Compact posts* (a 32px avatar, a quieter byline, the action
+  bar pulled up under the text); *Rounded-square avatars*; *Actions on hover* (the action bar shows
+  for the pointer or the keyboard and stays out of the way otherwise);
+  *No counts on the action bar*; *Stars, not hearts* (a gold star for the
+  like button, and likes called favorites in X's controls); *A quieter
+  composer* (no audience chip, no who-can-reply line, no Grok, and a number
+  of characters left — from X's own count — in place of the ring).
   - *Remember what X loads* and *Download button on posts*.
   - *Dim* — X's retired blue-grey dark theme, painted over Lights out. Built
     by reading X's own stylesheet for every rule that paints a Lights-out

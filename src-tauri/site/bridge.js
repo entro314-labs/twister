@@ -32,6 +32,12 @@
     classicTwitter: 'data-twister-classic',
     fitTimeline: 'data-twister-fit',
     smoothScroll: 'data-twister-smooth',
+    compactPosts: 'data-twister-compact',
+    squareAvatars: 'data-twister-square',
+    actionsOnHover: 'data-twister-actions-hover',
+    hideActionCounts: 'data-twister-hide-action-counts',
+    starFavorites: 'data-twister-star',
+    compactCompose: 'data-twister-compact-compose',
   }
 
   function installSheet(name, css) {
@@ -57,6 +63,9 @@
     root.toggleAttribute('data-twister-font', font !== '')
     if (font) root.style.setProperty('--twister-font', font)
     else root.style.removeProperty('--twister-font')
+    const size = niceties.textSize === 'small' || niceties.textSize === 'large' ? niceties.textSize : ''
+    if (size) root.setAttribute('data-twister-text-size', size)
+    else root.removeAttribute('data-twister-text-size')
     stampRoute()
     stampDim()
   }
@@ -133,6 +142,139 @@
         path.removeAttribute('data-twister-bird')
         path.style.fill = ''
       }
+    }
+  }
+
+  // ── The star ──────────────────────────────────────────────────────────────
+  // The like button carries a test id, so its glyph is swapped whatever
+  // heart X drew: an outline when unlit, filled when lit. The heart's own
+  // path is kept on the element and restored when the switch goes off.
+  const STAR =
+    'M12 2.6l2.95 6.28 6.85.82-5.06 4.7 1.34 6.8L12 17.8l-6.08 3.4 1.34-6.8L2.2 9.7l6.85-.82L12 2.6z'
+  const LIKE_PATHS = '[data-testid="like"] svg path, [data-testid="unlike"] svg path'
+  function swapStar() {
+    const on = Boolean(niceties.starFavorites)
+    for (const path of document.querySelectorAll(on ? LIKE_PATHS : '[data-twister-heart]')) {
+      const d = path.getAttribute('d') || ''
+      if (on) {
+        // X redraws the heart on every like and unlike; whatever it drew last
+        // is what goes back.
+        if (d !== STAR) path.setAttribute('data-twister-heart', d)
+        const lit = Boolean(path.closest('[data-testid="unlike"]'))
+        if (d !== STAR) path.setAttribute('d', STAR)
+        path.setAttribute('fill', lit ? 'currentColor' : 'none')
+        path.setAttribute('stroke', 'currentColor')
+        path.setAttribute('stroke-width', '1.75')
+        path.setAttribute('stroke-linejoin', 'round')
+      } else {
+        path.setAttribute('d', path.getAttribute('data-twister-heart') || d)
+        for (const attribute of ['data-twister-heart', 'fill', 'stroke', 'stroke-width', 'stroke-linejoin']) path.removeAttribute(attribute)
+      }
+    }
+  }
+
+  // ── The count ──────────────────────────────────────────────────────────────
+  // X draws its count as a ring with no number on it and no ARIA. The quiet
+  // composer hides the ring and writes what is left beside it, counted by
+  // X's rule — the rule compose.rs applies to the Write panel: a URL weighs
+  // 23, most characters one, CJK and emoji two. Two copies by design: one
+  // runs in the page and one in Rust, and they cannot share a function.
+  const LIMIT = 280
+  const URL_WEIGHT = 23
+  const segmenter =
+    typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null
+  function graphemes(text) {
+    if (!segmenter) return [...text]
+    const out = []
+    for (const { segment } of segmenter.segment(text)) out.push(segment)
+    return out
+  }
+  function weight(grapheme) {
+    const cp = grapheme.codePointAt(0)
+    if (cp === undefined) return 0
+    const light = cp <= 4351 || (cp >= 8192 && cp <= 8205) || (cp >= 8208 && cp <= 8223) || (cp >= 8242 && cp <= 8247)
+    return light ? 1 : 2
+  }
+  function looksLikeUrl(run) {
+    const trimmed = run.replace(/[.,)!?;:]+$/, '')
+    const scheme = trimmed.match(/^https?:\/\/(.*)$/)
+    if (scheme) return scheme[1].includes('.') && !scheme[1].startsWith('.')
+    const host = trimmed.split('/')[0]
+    if (host.startsWith('@')) return false
+    const labels = host.split('.')
+    if (labels.length < 2) return false
+    const tld = labels[labels.length - 1]
+    return /^[a-zA-Z]{2,}$/.test(tld) && labels.slice(0, -1).every((label) => /^[a-zA-Z0-9-]+$/.test(label))
+  }
+  function weigh(text) {
+    let total = 0
+    for (const run of text.split(/(\s+)/)) {
+      if (run === '') continue
+      if (/^\s+$/.test(run)) {
+        total += graphemes(run).length
+        continue
+      }
+      const opened = run.length - run.replace(/^[([]+/, '').length
+      const closed = run.length - run.replace(/[)\].,!?;:]+$/, '').length
+      if (looksLikeUrl(run.slice(opened))) {
+        total += opened + URL_WEIGHT + closed
+        continue
+      }
+      for (const grapheme of graphemes(run)) total += weight(grapheme)
+    }
+    return total
+  }
+
+  // The toolbar belongs to whichever part of the thread is being written:
+  // the one with focus, else the last.
+  const TEXTBOX = '[data-testid^="tweetTextarea_"][role="textbox"]'
+  function textboxFor(bar) {
+    let node = bar.parentElement
+    while (node && !node.querySelector(TEXTBOX)) node = node.parentElement
+    if (!node) return null
+    const boxes = node.querySelectorAll(TEXTBOX)
+    for (const box of boxes) if (box.contains(document.activeElement)) return box
+    return boxes[boxes.length - 1] || null
+  }
+  // The ring is the one SVG in the composer's bottom row that is circles and
+  // not a button. X draws that row two ways — the Post button inside the
+  // toolbar, or beside it — so the row is whatever holds both.
+  const SEND = '[data-testid="tweetButtonInline"], [data-testid="tweetButton"]'
+  function rowOf(bar) {
+    let node = bar
+    while (node && node !== document.body && !node.querySelector(SEND)) node = node.parentElement
+    return node && node !== document.body ? node : bar
+  }
+  function ringOf(row) {
+    for (const svg of row.querySelectorAll('svg')) {
+      if (svg.querySelector('circle') && !svg.closest('button, [role="button"], a')) return svg
+    }
+    return null
+  }
+  function paintCount() {
+    const on = Boolean(niceties.compactCompose)
+    for (const bar of document.querySelectorAll('[data-testid="toolBar"]')) {
+      const row = rowOf(bar)
+      let label = row.querySelector('[data-twister-count]')
+      const ring = ringOf(row)
+      if (ring) ring.toggleAttribute('data-twister-ring', on)
+      const box = on ? textboxFor(bar) : null
+      const send = row.querySelector(SEND)
+      const anchor = ring ? ring.parentElement : send ? send.parentElement : null
+      if (!on || !box || !anchor || !anchor.parentElement) {
+        if (label) label.remove()
+        continue
+      }
+      if (!label) {
+        label = document.createElement('span')
+        label.setAttribute('data-twister-count', '')
+        anchor.parentElement.insertBefore(label, anchor)
+      }
+      const left = LIMIT - weigh(box.innerText.replace(/\n$/, ''))
+      const text = String(left)
+      if (label.textContent !== text) label.textContent = text
+      label.toggleAttribute('data-over', left < 0)
+      label.toggleAttribute('data-near', left >= 0 && left <= 20)
     }
   }
 
@@ -227,24 +369,37 @@
     [/\bPost\b/g, 'Tweet'],
     [/\bpost\b/g, 'tweet'],
   ]
+  const STAR_WORDS = [
+    [/\bUnlike\b/g, 'Unfavorite'],
+    [/\bLiked\b/g, 'Favorited'],
+    [/\bLikes\b/g, 'Favorites'],
+    [/\bLike\b/g, 'Favorite'],
+  ]
+  function activeWords() {
+    const words = []
+    if (niceties.classicTwitter) words.push(...WORDS)
+    if (niceties.starFavorites) words.push(...STAR_WORDS)
+    return words
+  }
   const WORDING_HOSTS =
     'button, [role="button"], [role="tab"], [role="menuitem"], [data-testid="socialContext"], [data-testid="SideNav_NewTweet_Button"], h2[role="heading"], [data-testid="primaryColumn"] nav a, [data-testid="tweetTextarea_0"][data-placeholder], [aria-label]'
   const PERSON_WROTE =
     '[data-testid="tweetText"], [data-testid="User-Name"], [data-testid="UserName"], [data-testid="UserDescription"], [data-testid="UserCell"] [dir], [contenteditable="true"], [data-testid="tweetTextarea_0"]'
   const english = () => /^en\b/.test(document.documentElement.lang || 'en')
 
-  function reword(text) {
+  function reword(text, words) {
     let out = text
-    for (const [pattern, replacement] of WORDS) out = out.replace(pattern, replacement)
+    for (const [pattern, replacement] of words) out = out.replace(pattern, replacement)
     return out
   }
 
   function restoreWording() {
-    if (!niceties.classicTwitter || !english()) return
+    const words = activeWords()
+    if (words.length === 0 || !english()) return
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const parent = node.parentElement
-        if (!parent || !/post/i.test(node.nodeValue)) return NodeFilter.FILTER_REJECT
+        if (!parent || !/post|like/i.test(node.nodeValue)) return NodeFilter.FILTER_REJECT
         if (parent.closest(PERSON_WROTE)) return NodeFilter.FILTER_REJECT
         return parent.closest(WORDING_HOSTS) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
       },
@@ -252,19 +407,19 @@
     const nodes = []
     for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node)
     for (const node of nodes) {
-      const next = reword(node.nodeValue)
+      const next = reword(node.nodeValue, words)
       if (next !== node.nodeValue) node.nodeValue = next
     }
-    for (const element of document.querySelectorAll('[aria-label*="ost"], [data-placeholder*="ost"]')) {
+    for (const element of document.querySelectorAll('[aria-label*="ost"], [aria-label*="ike"], [data-placeholder*="ost"]')) {
       if (element.closest(PERSON_WROTE)) continue
       for (const attribute of ['aria-label', 'data-placeholder']) {
         const value = element.getAttribute(attribute)
-        if (value && /post/i.test(value)) element.setAttribute(attribute, reword(value))
+        if (value && /post|like/i.test(value)) element.setAttribute(attribute, reword(value, words))
       }
     }
-    if (document.title && !document.title.includes('Twitter')) {
+    if (niceties.classicTwitter && document.title && !document.title.includes('Twitter')) {
       const title = document.title
-      const next = title === 'X' ? 'Twitter' : reword(title).replace(/ \/ X$/, ' / Twitter')
+      const next = title === 'X' ? 'Twitter' : reword(title, WORDS).replace(/ \/ X$/, ' / Twitter')
       if (next !== title) document.title = next
     }
   }
@@ -406,6 +561,8 @@
       markPromoted()
       markGrok()
       swapBird()
+      swapStar()
+      paintCount()
       stampDim()
       restoreWording()
       measureLayout()
@@ -421,6 +578,8 @@
     markPromoted()
     markGrok()
     swapBird()
+    swapStar()
+    paintCount()
     restoreWording()
     reportedWidth = 0
     measureLayout()
@@ -450,7 +609,13 @@
 
   function start() {
     stamp()
-    observer.observe(document.documentElement, { childList: true, subtree: true })
+    // A like flips the button's test id in place; the star follows it.
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-testid'],
+    })
     findProfile()
     report()
   }
