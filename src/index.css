@@ -83,6 +83,20 @@
     height: 100%;
   }
 
+  /* The frame never scrolls as a document: the shell is one screen-high grid,
+     and every scrolling region inside it — the sidebar's rows, a tool panel,
+     Settings — is its own container. WebKit still rubber-bands the document
+     on a trackpad flick unless the root cannot overflow at all, and lets a
+     container's scroll chain up to it, so both are cut off here: the root is
+     clipped, and every container keeps its scroll to itself. */
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   html {
     color-scheme: light dark;
     -webkit-font-smoothing: antialiased;
@@ -90,9 +104,12 @@
     text-rendering: optimizeLegibility;
   }
 
+  * {
+    overscroll-behavior: contain;
+  }
+
   body {
     @apply bg-background font-sans text-foreground antialiased;
-    overscroll-behavior: none;
     /* Two ambient washes: the accent from the top-left (where the sidebar lives)
        and a cooler counter-tone from the right, so the desk has a direction
        instead of reading as one flat field. */
