@@ -375,10 +375,11 @@ pub fn tooltip_ready(app: AppHandle, width: f64, height: f64) -> Result<()> {
 
 // ─── Bridge (callable from a network's page) ────────────────────────────────
 
-/// The network the calling tab belongs to. A webview that is not a tab —
+/// The network whose page the calling tab is showing — a Threads tab on
+/// instagram.com is sending Instagram's rows. A webview that is not a tab —
 /// there is none that can reach these commands — is refused.
 fn caller_network(app: &AppHandle, webview: &Webview) -> Result<Network> {
-    site::network_of_label(app, webview.label())
+    site::page_network_of_label(app, webview.label())
         .ok_or_else(|| AppError::NotFound("That tab is gone.".into()))
 }
 

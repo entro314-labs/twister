@@ -761,6 +761,24 @@ pub fn network_of_label(app: &AppHandle, label: &str) -> Option<Network> {
     id_from_label(label).and_then(|id| tab_network(app, id))
 }
 
+/// Which network's page a webview is showing right now, for what it sends
+/// the store. A Threads tab signs in through instagram.com, and its
+/// allowlist lets it stay there; what that page loads is Instagram's, not
+/// Threads', and is filed as such. Falls back to the tab's own network for a
+/// host that is not a tab host — a sign-in provider's, say.
+pub fn page_network_of_label(app: &AppHandle, label: &str) -> Option<Network> {
+    let id = id_from_label(label)?;
+    let state = site(app);
+    let tabs = state.site.tabs.lock().ok()?;
+    let tab = tabs.iter().find(|t| t.state.id == id)?;
+    Some(
+        Url::parse(&tab.state.url)
+            .ok()
+            .and_then(|url| network::for_tab_url(&url))
+            .unwrap_or(tab.state.network),
+    )
+}
+
 /// The active tab's webview label, for checking who is calling.
 pub fn active_label(app: &AppHandle) -> Option<String> {
     active_id(app).map(label_for)
