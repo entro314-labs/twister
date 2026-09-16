@@ -81,7 +81,10 @@ export interface UpdateProgress {
   total: number | null
 }
 
-/** `site::Section` — where on X a tab currently is. */
+/** `network::Network` — which site a tab, a row, a job or a post belongs to. */
+export type Network = 'x' | 'bluesky' | 'threads' | 'instagram'
+
+/** `site::Section` — where on its site a tab currently is. */
 export type Section =
   | 'home'
   | 'explore'
@@ -108,9 +111,10 @@ export type SiteAction = 'back' | 'forward' | 'reload'
 /** `site::TabState` — one open tab. */
 export interface TabState {
   id: number
+  network: Network
   url: string
   section: Section
-  /** The page title with X's decoration stripped: "(3) Home / X" → "Home". */
+  /** The page title with the site's decoration stripped: "(3) Home / X" → "Home". */
   title: string
   unread: number
   loading: boolean
@@ -121,8 +125,8 @@ export interface SiteState {
   tabs: TabState[]
   /** The id of the tab in front; 0 before any tab exists. */
   active: number
-  /** The signed-in handle, once the bridge has seen X's profile link. */
-  handle: string | null
+  /** The signed-in handle on each network, once its bridge has seen the site's profile link. */
+  handles: Partial<Record<Network, string>>
 }
 
 /** `site::Insets` — the frame around the island, in logical pixels. */
@@ -167,6 +171,7 @@ export type TooltipSide = 'right' | 'bottom'
 
 /** `db::User` — one person, as the page last showed them. */
 export interface Person {
+  network: Network
   id: string
   handle: string
   name: string
@@ -184,7 +189,7 @@ export interface Person {
   followsMe: boolean | null
   /** The signed-in account follows them; `null` when X did not say. */
   followedByMe: boolean | null
-  /** The X operation that loaded them: Following, Followers, ListMembers… */
+  /** The operation that loaded them: X's Following, Bluesky's app.bsky.graph.getFollows… */
   source: string
   firstSeen: string
   lastSeen: string
@@ -201,7 +206,10 @@ export type PostKind = 'post' | 'reply' | 'repost' | 'quote'
 
 /** `db::Post` */
 export interface Post {
+  network: Network
   id: string
+  /** Meta's shortcode, which its URLs carry; empty on X and Bluesky. */
+  slug: string
   authorId: string
   authorHandle: string
   text: string
@@ -224,6 +232,7 @@ export interface Post {
 
 /** `db::UserFilter` — every field optional; an empty filter is everyone. */
 export interface PersonFilter {
+  network?: Network
   search?: string
   source?: string
   followsMe?: boolean
@@ -238,6 +247,7 @@ export interface PersonFilter {
 
 /** `db::PostFilter` */
 export interface PostFilter {
+  network?: Network
   search?: string
   source?: string
   kind?: PostKind
@@ -254,8 +264,10 @@ export interface PostFilter {
 export interface StoreCounts {
   users: number
   posts: number
-  /** `[source, rows]` pairs, most rows first. */
+  /** `[source, rows]` pairs, most rows first, within the network asked for. */
   sources: Array<[string, number]>
+  /** `[network, rows]` pairs over everything, most rows first. */
+  networks: Array<[string, number]>
 }
 
 export type ExportFormat = 'csv' | 'json' | 'markdown'
@@ -269,6 +281,7 @@ export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 /** `db::Job` — one entry in the ledger. */
 export interface Job {
   id: number
+  network: Network
   kind: OpKind
   /** JSON, as given to the runner. */
   params: string
@@ -300,6 +313,7 @@ export interface PostPart {
 
 /** `compose::Prepared` */
 export interface PreparedPost {
+  network: Network
   parts: PostPart[]
   limit: number
 }
@@ -309,6 +323,7 @@ export type ScheduledStatus = 'scheduled' | 'posting' | 'posted' | 'failed' | 'm
 /** `db::ScheduledPost` */
 export interface ScheduledPost {
   id: number
+  network: Network
   parts: string[]
   scheduledAt: string
   status: ScheduledStatus

@@ -1,10 +1,22 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "site",
-  "description": "x.com, reached only through the bridge. Seven commands, each validating its input: the prefs, a navigation, the signed-in handle, what X loaded, an operation's progress, a download request and a layout measurement. Nothing that reads or changes anything else on this machine. Labels are per tab: every tab gets a new one.",
+  "description": "The networks' pages, reached only through the bridge. Seven commands, each validating its input against the calling tab's network: the prefs, a navigation, the signed-in handle, what the site loaded, an operation's progress, a download request and a layout measurement. Nothing that reads or changes anything else on this machine. Labels are per tab: every tab gets a new one.",
   "webviews": ["site-*"],
   "remote": {
-    "urls": ["https://x.com/*", "https://*.x.com/*", "https://twitter.com/*", "https://*.twitter.com/*"]
+    "urls": [
+      "https://x.com/*",
+      "https://*.x.com/*",
+      "https://twitter.com/*",
+      "https://*.twitter.com/*",
+      "https://bsky.app/*",
+      "https://www.threads.com/*",
+      "https://threads.com/*",
+      "https://www.threads.net/*",
+      "https://threads.net/*",
+      "https://www.instagram.com/*",
+      "https://instagram.com/*"
+    ]
   },
   "permissions": [
     "allow-site-settings",

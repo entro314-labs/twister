@@ -6,6 +6,7 @@ import type {
   Destination,
   ExportFormat,
   Job,
+  Network,
   OpKind,
   OpsState,
   Person,
@@ -60,6 +61,17 @@ export function useActiveTab(): TabState | undefined {
   return site.data?.tabs.find((tab) => tab.id === site.data?.active)
 }
 
+/** The front tab's network; X before any tab exists. */
+export function useActiveNetwork(): Network {
+  return useActiveTab()?.network ?? 'x'
+}
+
+/** The signed-in handle on a network, once its bridge has seen it. */
+export function useHandle(network: Network): string | null {
+  const site = useSiteState()
+  return site.data?.handles[network] ?? null
+}
+
 /** What is in the scripts and styles folder right now — not what is running. */
 export function useUserAssets() {
   return useQuery({
@@ -71,10 +83,12 @@ export function useUserAssets() {
   })
 }
 
-export function useStoreCounts() {
+/** How much is stored: on one network, or on all of them when none is given. */
+export function useStoreCounts(network?: Network) {
   return useQuery({
-    queryKey: queryKeys.store.counts(),
-    queryFn: async () => invokeCommand<StoreCounts>(IPC_COMMANDS.getStoreCounts),
+    queryKey: queryKeys.store.counts(network ?? null),
+    queryFn: async () =>
+      invokeCommand<StoreCounts>(IPC_COMMANDS.getStoreCounts, { network: network ?? null }),
     staleTime: 5000,
   })
 }
@@ -135,6 +149,14 @@ export function useNavigateSite() {
   })
 }
 
+/** Brings a network to the front: its last-used tab, or a new one on its home. */
+export function useSwitchNetwork() {
+  return useMutation({
+    mutationFn: async (network: Network) =>
+      invokeCommand<number>(IPC_COMMANDS.switchNetwork, { network }),
+  })
+}
+
 export function useSiteAction() {
   return useMutation({
     mutationFn: async (action: SiteAction) =>
@@ -165,10 +187,14 @@ export function useReloadSite() {
   })
 }
 
+/** A tab on a URL, on a network's home, or beside the front tab on its network. */
 export function useNewTab() {
   return useMutation({
-    mutationFn: async (url?: string) =>
-      invokeCommand<number>(IPC_COMMANDS.newTab, { url: url ?? null }),
+    mutationFn: async (input?: { url?: string; network?: Network }) =>
+      invokeCommand<number>(IPC_COMMANDS.newTab, {
+        url: input?.url ?? null,
+        network: input?.network ?? null,
+      }),
   })
 }
 
@@ -212,8 +238,12 @@ export function useClearCaptured() {
 export function useStartOp() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: async (input: { kind: OpKind; params: Record<string, unknown>; dryRun: boolean }) =>
-      invokeCommand<Job>(IPC_COMMANDS.startOp, input),
+    mutationFn: async (input: {
+      network: Network
+      kind: OpKind
+      params: Record<string, unknown>
+      dryRun: boolean
+    }) => invokeCommand<Job>(IPC_COMMANDS.startOp, input),
     onSuccess: (job) => {
       client.setQueryData<OpsState>(queryKeys.ops.state(), (previous) => ({
         running: job,
@@ -229,10 +259,11 @@ export function useCancelOp() {
   })
 }
 
-export function usePreparePost(markdown: string) {
+export function usePreparePost(network: Network, markdown: string) {
   return useQuery({
-    queryKey: ['compose', 'prepare', markdown] as const,
-    queryFn: async () => invokeCommand<PreparedPost>(IPC_COMMANDS.preparePost, { markdown }),
+    queryKey: ['compose', 'prepare', network, markdown] as const,
+    queryFn: async () =>
+      invokeCommand<PreparedPost>(IPC_COMMANDS.preparePost, { network, markdown }),
     placeholderData: (previous) => previous,
     staleTime: Number.POSITIVE_INFINITY,
   })
@@ -241,7 +272,8 @@ export function usePreparePost(markdown: string) {
 export function usePostNow() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: async (markdown: string) => invokeCommand<Job>(IPC_COMMANDS.postNow, { markdown }),
+    mutationFn: async (input: { network: Network; markdown: string }) =>
+      invokeCommand<Job>(IPC_COMMANDS.postNow, input),
     onSuccess: (job) => {
       client.setQueryData<OpsState>(queryKeys.ops.state(), (previous) => ({
         running: job,
@@ -254,7 +286,7 @@ export function usePostNow() {
 export function useSchedulePost() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: async (input: { markdown: string; scheduledAt: string }) =>
+    mutationFn: async (input: { network: Network; markdown: string; scheduledAt: string }) =>
       invokeCommand<ScheduledPost>(IPC_COMMANDS.schedulePost, input),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.schedule.root })

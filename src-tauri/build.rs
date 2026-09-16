@@ -1,7 +1,7 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     // Declaring the commands generates an `allow-<command>` permission for
-    // each, which is what lets the capability files hand the x.com webviews
+    // each, which is what lets the capability files hand the site webviews
     // exactly the bridge's commands and the shell all the rest. Without a
     // manifest every app command is open to every local webview, and a
     // remote page can reach none — neither is the shape this app needs.
@@ -12,6 +12,7 @@ fn main() {
             "update_settings",
             "get_site_state",
             "navigate_site",
+            "switch_network",
             "site_action",
             "set_site_insets",
             "set_site_visible",
@@ -47,7 +48,7 @@ fn main() {
             "restart_and_install",
             // Tooltip window
             "tooltip_ready",
-            // Bridge, callable from x.com
+            // Bridge, callable from a network's page
             "site_settings",
             "site_navigated",
             "site_profile",

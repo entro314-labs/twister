@@ -1,20 +1,23 @@
-//! Writing posts: Markdown in, X-shaped text out, cut into a thread.
+//! Writing posts: Markdown in, post-shaped text out, cut into a thread.
 //!
-//! X has no formatting, so `**bold**` and `*italic*` become the Unicode
-//! mathematical letters that read as bold and italic everywhere X renders
-//! text (and, fairly, nowhere a screen reader is happy — the composer says
-//! so). Headings, lists and links are flattened to what survives. A `---`
-//! line is a thread break; anything longer than the limit is cut at a
-//! paragraph, then a sentence, then a word.
+//! No network here has formatting, so `**bold**` and `*italic*` become the
+//! Unicode mathematical letters that read as bold and italic everywhere
+//! text is rendered (and, fairly, nowhere a screen reader is happy — the
+//! composer says so). Headings, lists and links are flattened to what
+//! survives. A `---` line is a thread break; anything longer than the
+//! network's limit is cut at a paragraph, then a sentence, then a word.
 //!
-//! The count is X's own rule: URLs weigh 23 whatever their length, most
-//! characters weigh one, and everything outside the Latin, Greek, Cyrillic,
-//! Hebrew and Arabic blocks — CJK, emoji — weighs two.
+//! The count is the network's own rule. X's: URLs weigh 23 whatever their
+//! length, most characters weigh one, and everything outside the Latin,
+//! Greek, Cyrillic, Hebrew and Arabic blocks — CJK, emoji — weighs two.
+//! Bluesky's: 300 graphemes, a URL counted as typed.
 
 use serde::Serialize;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const LIMIT: usize = 280;
+use crate::error::{AppError, Result};
+use crate::network::Network;
+
 const URL_WEIGHT: usize = 23;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -22,14 +25,15 @@ const URL_WEIGHT: usize = 23;
 pub struct Part {
     pub text: String,
     pub count: usize,
-    /// Whether X would link something in it — a post with a URL is billed
-    /// differently through the API, which the Write panel says.
+    /// Whether the site would link something in it — a post with a URL is
+    /// billed differently through X's API, which the Write panel says.
     pub has_link: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Prepared {
+    pub network: Network,
     pub parts: Vec<Part>,
     pub limit: usize,
 }
@@ -98,7 +102,7 @@ fn weight(grapheme: &str) -> usize {
 }
 
 /// X's weighted length.
-pub fn count(text: &str) -> usize {
+fn weighted(text: &str) -> usize {
     let spans = url_spans(text);
     let mut total = 0;
     let mut cursor = 0;
@@ -111,6 +115,14 @@ pub fn count(text: &str) -> usize {
         cursor = end;
     }
     total + text[cursor..].graphemes(true).map(weight).sum::<usize>()
+}
+
+/// How long a text is by the network's own rule.
+pub fn count(network: Network, text: &str) -> usize {
+    match network {
+        Network::X => weighted(text),
+        Network::Bluesky | Network::Threads | Network::Instagram => text.graphemes(true).count(),
+    }
 }
 
 // ─── Styling ────────────────────────────────────────────────────────────────
@@ -233,8 +245,8 @@ pub fn render(markdown: &str) -> String {
     out.join("\n")
 }
 
-/// Cuts rendered text into parts under the limit.
-pub fn split(rendered: &str, limit: usize) -> Vec<String> {
+/// Cuts rendered text into parts under the limit, counted the network's way.
+pub fn split(network: Network, rendered: &str, limit: usize) -> Vec<String> {
     let mut parts = Vec::new();
     for block in rendered.split('\u{1}') {
         let block = block.trim_matches('\n');
@@ -248,7 +260,7 @@ pub fn split(rendered: &str, limit: usize) -> Vec<String> {
             } else {
                 format!("{current}{piece}")
             };
-            if count(candidate.trim()) <= limit {
+            if count(network, candidate.trim()) <= limit {
                 current = candidate;
                 continue;
             }
@@ -257,8 +269,8 @@ pub fn split(rendered: &str, limit: usize) -> Vec<String> {
             }
             current = piece.trim_start().to_string();
             // A single piece over the limit is cut at words, then hard.
-            while count(&current) > limit {
-                let cut = cut_point(&current, limit);
+            while count(network, &current) > limit {
+                let cut = cut_point(network, &current, limit);
                 parts.push(current[..cut].trim().to_string());
                 current = current[cut..].trim_start().to_string();
             }
@@ -294,11 +306,11 @@ fn pieces(block: &str) -> Vec<String> {
     out
 }
 
-fn cut_point(text: &str, limit: usize) -> usize {
+fn cut_point(network: Network, text: &str, limit: usize) -> usize {
     let mut last_space = None;
     let mut last_ok = 0;
     for (i, grapheme) in text.grapheme_indices(true) {
-        if count(&text[..i + grapheme.len()]) > limit {
+        if count(network, &text[..i + grapheme.len()]) > limit {
             break;
         }
         last_ok = i + grapheme.len();
@@ -312,27 +324,39 @@ fn cut_point(text: &str, limit: usize) -> usize {
     }
 }
 
-pub fn prepare(markdown: &str) -> Prepared {
-    let parts = split(&render(markdown), LIMIT)
+/// The thread as `network` would take it, or why it cannot: Meta's
+/// composers are not driven from here.
+pub fn prepare(network: Network, markdown: &str) -> Result<Prepared> {
+    let limit = network.compose_limit().ok_or_else(|| {
+        AppError::InvalidInput(format!(
+            "Twister does not post to {}. Use its own composer.",
+            network.name()
+        ))
+    })?;
+    let parts = split(network, &render(markdown), limit)
         .into_iter()
         .map(|text| Part {
-            count: count(&text),
+            count: count(network, &text),
             has_link: !url_spans(&text).is_empty(),
             text,
         })
         .collect();
-    Prepared {
+    Ok(Prepared {
+        network,
         parts,
-        limit: LIMIT,
-    }
+        limit,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const LIMIT: usize = 280;
+
     #[test]
     fn counting_follows_x_weights() {
+        let count = |text: &str| count(Network::X, text);
         assert_eq!(count("hello"), 5);
         assert_eq!(count("héllo"), 5);
         assert_eq!(count("日本語"), 6);
@@ -347,6 +371,22 @@ mod tests {
         assert_eq!(count("(see x.com/home)"), 5 + 23 + 1);
         assert_eq!(count("snake_case.rs"), 13);
         assert_eq!(count(""), 0);
+    }
+
+    #[test]
+    fn bluesky_counts_graphemes_and_urls_as_typed() {
+        let count = |text: &str| count(Network::Bluesky, text);
+        assert_eq!(count("hello"), 5);
+        assert_eq!(count("日本語"), 3);
+        assert_eq!(count("👨‍👩‍👧"), 1);
+        assert_eq!(count("see https://example.com/a ok"), 28);
+        let prepared = prepare(Network::Bluesky, &"word ".repeat(100)).expect("ok");
+        assert_eq!(prepared.limit, 300);
+        assert_eq!(prepared.network, Network::Bluesky);
+        assert!(prepared.parts.len() >= 2);
+        assert!(prepared.parts.iter().all(|p| p.count <= 300));
+        assert!(prepare(Network::Threads, "hi").is_err());
+        assert!(prepare(Network::Instagram, "hi").is_err());
     }
 
     #[test]
@@ -366,7 +406,7 @@ mod tests {
     fn blocks_flatten_and_breaks_split_the_thread() {
         let rendered = render("# Title\n\n- one\n- two\n\n> quoted\n\n---\n\nsecond post");
         assert!(rendered.starts_with("𝗧𝗶𝘁𝗹𝗲\n\n• one\n• two\n\n“quoted”"));
-        let parts = split(&rendered, LIMIT);
+        let parts = split(Network::X, &rendered, LIMIT);
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[1], "second post");
     }
@@ -375,40 +415,43 @@ mod tests {
     fn long_text_is_cut_at_paragraphs_sentences_then_words() {
         let sentence = "This is a sentence that has some words in it. ";
         let text = sentence.repeat(10);
-        let parts = split(&text, LIMIT);
+        let parts = split(Network::X, &text, LIMIT);
         assert!(parts.len() >= 2);
         for part in &parts {
-            assert!(count(part) <= LIMIT, "{part}");
+            assert!(count(Network::X, part) <= LIMIT, "{part}");
             assert!(part.ends_with('.'), "{part}");
         }
         let words = "word ".repeat(100);
-        let parts = split(&words, LIMIT);
+        let parts = split(Network::X, &words, LIMIT);
         assert!(
             parts
                 .iter()
-                .all(|p| count(p) <= LIMIT && !p.contains("wor d"))
+                .all(|p| count(Network::X, p) <= LIMIT && !p.contains("wor d"))
         );
         let solid = "x".repeat(600);
-        let parts = split(&solid, LIMIT);
+        let parts = split(Network::X, &solid, LIMIT);
         assert_eq!(parts.len(), 3);
         assert_eq!(parts[0].len(), 280);
     }
 
     #[test]
     fn prepare_reports_counts_per_part() {
-        let prepared = prepare("hello **world**\n---\nagain");
+        let prepared = prepare(Network::X, "hello **world**\n---\nagain").expect("ok");
         assert_eq!(prepared.parts.len(), 2);
         // The bold letters are outside the light ranges, so they weigh two.
         assert_eq!(prepared.parts[0].count, 16);
         assert_eq!(prepared.parts[1].text, "again");
         assert_eq!(prepared.limit, 280);
-        assert!(prepare("   \n\n").parts.is_empty());
+        assert!(prepare(Network::X, "   \n\n").expect("ok").parts.is_empty());
     }
 
     #[test]
     fn a_part_knows_whether_x_would_link_something_in_it() {
-        let prepared =
-            prepare("plain words\n---\nsee https://example.com/x\n---\nask me@example.com");
+        let prepared = prepare(
+            Network::X,
+            "plain words\n---\nsee https://example.com/x\n---\nask me@example.com",
+        )
+        .expect("ok");
         let links: Vec<bool> = prepared.parts.iter().map(|p| p.has_link).collect();
         assert_eq!(links, vec![false, true, false]);
     }

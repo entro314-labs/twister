@@ -1,9 +1,9 @@
-// Twister's bridge into x.com. Injected at document start into the site
-// webview, main frame only, on every page load.
+// Twister's bridge into x.com. Injected at document start into every X tab,
+// main frame only, on every page load, after common.js.
 //
 // Everything that reaches into X's DOM lives here and in niceties.css: X ships
 // changes without notice, and a broken nicety should be a one-file fix. Rust
-// substitutes the two __TWISTER_*__ placeholders before injection.
+// substitutes the three __TWISTER_*__ placeholders before injection.
 //
 // The bridge calls four commands — site_settings, site_navigated,
 // site_profile and site_layout — and each validates what it is sent, because

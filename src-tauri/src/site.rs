@@ -1,5 +1,6 @@
-//! The site: x.com in child webviews — one per tab — and everything the app
-//! knows about them.
+//! The site: a network's page in child webviews — one per tab — and
+//! everything the app knows about them. A tab belongs to one network for its
+//! life (see `network.rs`); the scripts injected into it are that network's.
 //!
 //! The shell webview owns the frame — sidebar, titlebar, status bar — and the
 //! tabs own the island inside it. A tab's webview sits ON TOP of the shell,
@@ -9,11 +10,12 @@
 //! the shell reports, re-applied by Rust on every window resize so the island
 //! never lags the frame.
 //!
-//! Everything that touches X's DOM is in `site/*.js` and `site/niceties.css`.
-//! This file only knows URLs and titles.
+//! Everything that touches a site's DOM is in `site/<network>/*` and
+//! `site/common.js`. This file only knows URLs and titles.
 
+use std::collections::BTreeMap;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
@@ -24,11 +26,11 @@ use tauri::{
 use url::Url;
 
 use crate::error::{AppError, Result};
+use crate::network::{self, Network};
 use crate::settings::SitePrefs;
 use crate::{ops, userland};
 
 pub const SHELL_LABEL: &str = "shell";
-pub const HOME: &str = "https://x.com/home";
 pub const MAX_TABS: usize = 12;
 
 /// The whole site state, pushed to the shell whenever any of it changes.
@@ -36,23 +38,47 @@ pub const EVENT_STATE: &str = "twister://site-state";
 /// A one-line notice for the status bar. Payload: [`Notice`].
 pub const EVENT_NOTICE: &str = "twister://notice";
 
-const BRIDGE_JS: &str = include_str!("../site/bridge.js");
-const CAPTURE_JS: &str = include_str!("../site/capture.js");
-const OPS_JS: &str = include_str!("../site/ops.js");
-const NICETIES_CSS: &str = include_str!("../site/niceties.css");
+/// The plumbing every network's scripts share: the response hook, the
+/// batcher, the download button, the operations runner.
+const COMMON_JS: &str = include_str!("../site/common.js");
 
-/// Hosts a navigation may go to inside the webview. Everything else opens in
-/// the system browser. `on_navigation` fires for iframes as well as the main
-/// frame, so the sign-in providers X embeds are here too — denying them would
-/// blank the buttons on the login page.
-const ALLOWED_HOSTS: &[&str] = &[
-    "x.com",
-    "twitter.com",
-    "twimg.com",
-    "t.co",
-    "accounts.google.com",
-    "appleid.apple.com",
-];
+/// A network's three scripts and its stylesheet. Each bridge carries the
+/// same three placeholders, substituted before injection.
+struct Scripts {
+    bridge: &'static str,
+    capture: &'static str,
+    ops: &'static str,
+    css: &'static str,
+}
+
+fn scripts(network: Network) -> Scripts {
+    match network {
+        Network::X => Scripts {
+            bridge: include_str!("../site/x/bridge.js"),
+            capture: include_str!("../site/x/capture.js"),
+            ops: include_str!("../site/x/ops.js"),
+            css: include_str!("../site/x/niceties.css"),
+        },
+        Network::Bluesky => Scripts {
+            bridge: include_str!("../site/bluesky/bridge.js"),
+            capture: include_str!("../site/bluesky/capture.js"),
+            ops: include_str!("../site/bluesky/ops.js"),
+            css: include_str!("../site/bluesky/niceties.css"),
+        },
+        Network::Threads => Scripts {
+            bridge: include_str!("../site/threads/bridge.js"),
+            capture: include_str!("../site/meta/capture.js"),
+            ops: include_str!("../site/threads/ops.js"),
+            css: include_str!("../site/threads/niceties.css"),
+        },
+        Network::Instagram => Scripts {
+            bridge: include_str!("../site/instagram/bridge.js"),
+            capture: include_str!("../site/meta/capture.js"),
+            ops: include_str!("../site/instagram/ops.js"),
+            css: include_str!("../site/instagram/niceties.css"),
+        },
+    }
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -61,9 +87,10 @@ const ALLOWED_HOSTS: &[&str] = &[
 #[serde(rename_all = "camelCase")]
 pub struct TabState {
     pub id: u32,
+    pub network: Network,
     pub url: String,
     pub section: Section,
-    /// The page title with X's own decoration stripped: "(3) Home / X" → "Home".
+    /// The page title with the site's own decoration stripped: "(3) Home / X" → "Home".
     pub title: String,
     /// Parsed from the title; X prefixes it with the unread count.
     pub unread: u32,
@@ -76,8 +103,9 @@ pub struct TabState {
 pub struct SiteState {
     pub tabs: Vec<TabState>,
     pub active: u32,
-    /// The signed-in handle, once the bridge has seen X's profile link.
-    pub handle: Option<String>,
+    /// The signed-in handle on each network, once its bridge has seen the
+    /// site's own profile link. Keyed by the network's slug.
+    pub handles: BTreeMap<Network, String>,
 }
 
 impl SiteState {
@@ -111,6 +139,20 @@ pub enum Destination {
     Bookmarks,
     Profile,
     Compose,
+}
+
+impl Destination {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Home => "Home",
+            Self::Explore => "Explore",
+            Self::Notifications => "Notifications",
+            Self::Messages => "Messages",
+            Self::Bookmarks => "Bookmarks",
+            Self::Profile => "Profile",
+            Self::Compose => "Compose",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -163,22 +205,28 @@ pub struct SavedTabs {
 
 struct Tab {
     state: TabState,
+    /// The narrowest island this page's layout fits in, as its bridge
+    /// measured it; zero until it has.
+    min_width: f64,
+    /// When this tab was last in front, so switching networks lands on the
+    /// tab that was being used there.
+    last_active: u64,
 }
 
 pub struct Site {
     tabs: Mutex<Vec<Tab>>,
     active: AtomicU32,
-    handle: Mutex<Option<String>>,
+    handles: Mutex<BTreeMap<Network, String>>,
     pub insets: Mutex<Insets>,
     /// The last prefs applied, so a fresh page load bakes them in.
     pub prefs: Mutex<SitePrefs>,
     /// Whether the shell wants the site showing. Re-applied after a rebuild.
     pub visible: AtomicBool,
-    /// The narrowest island X's layout fits in, as the bridge measured it.
-    pub content_min_width: Mutex<f64>,
     /// Tab ids only ever go up, so a closed tab's webview label — which the
     /// manager keeps until the close has gone through — is never reused.
     next_id: AtomicU32,
+    /// A clock for `last_active`: one tick per activation.
+    activations: AtomicU64,
 }
 
 impl Site {
@@ -186,12 +234,12 @@ impl Site {
         Self {
             tabs: Mutex::new(Vec::new()),
             active: AtomicU32::new(0),
-            handle: Mutex::new(None),
+            handles: Mutex::new(BTreeMap::new()),
             insets: Mutex::new(Insets::default()),
             prefs: Mutex::new(prefs),
             visible: AtomicBool::new(true),
-            content_min_width: Mutex::new(0.0),
             next_id: AtomicU32::new(1),
+            activations: AtomicU64::new(1),
         }
     }
 
@@ -203,7 +251,7 @@ impl Site {
                 .map(|tabs| tabs.iter().map(|t| t.state.clone()).collect())
                 .unwrap_or_default(),
             active: self.active.load(Ordering::Relaxed),
-            handle: self.handle.lock().ok().and_then(|h| h.clone()),
+            handles: self.handles.lock().map(|h| h.clone()).unwrap_or_default(),
         }
     }
 }
@@ -218,10 +266,11 @@ pub fn id_from_label(label: &str) -> Option<u32> {
     label.strip_prefix("site-")?.parse().ok()
 }
 
-/// Whether a navigation may happen inside the webview. Redirect hops each pass
-/// through here, so a `t.co` link is allowed and the external page it resolves
-/// to is not — which is exactly when it should leave for the browser.
-pub fn allows(url: &Url) -> bool {
+/// Whether a navigation may happen inside one of `network`'s tabs. Redirect
+/// hops each pass through here, so a `t.co` link is allowed and the external
+/// page it resolves to is not — which is exactly when it should leave for
+/// the browser, or for a tab of the network it belongs to.
+pub fn allows(network: Network, url: &Url) -> bool {
     match url.scheme() {
         "about" | "blob" | "data" => return true,
         "http" | "https" => {}
@@ -230,31 +279,34 @@ pub fn allows(url: &Url) -> bool {
     let Some(host) = url.host_str() else {
         return false;
     };
-    ALLOWED_HOSTS
-        .iter()
-        .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
+    network.allows_host(host)
 }
 
-/// A URL a tab may open on: X itself, nothing else.
-pub fn tab_url(url: &str) -> Result<Url> {
+/// A URL a tab may open on: a network's own site, nothing else — and which
+/// network that is.
+pub fn tab_url(url: &str) -> Result<(Url, Network)> {
     let parsed = Url::parse(url).map_err(|e| AppError::InvalidInput(format!("Bad URL: {e}")))?;
-    let host = parsed.host_str().unwrap_or_default();
-    if parsed.scheme() != "https" || !matches!(host, "x.com" | "twitter.com" | "www.x.com") {
-        return Err(AppError::InvalidInput(format!(
-            "{url} is not somewhere a tab can open."
-        )));
-    }
-    Ok(parsed)
+    let network = network::for_tab_url(&parsed)
+        .ok_or_else(|| AppError::InvalidInput(format!("{url} is not somewhere a tab can open.")))?;
+    Ok((parsed, network))
 }
 
-/// The unread count X puts at the front of every real page title, or `None`
-/// when the title is one of the transient ones ("X", "") that carry no
-/// information and must not reset the badge.
-pub fn unread_from_title(title: &str) -> Option<u32> {
+/// The title with the site's decoration stripped, or `None` when it carries
+/// none — a transient title ("X", "") that says nothing about the page.
+fn undecorated(network: Network, title: &str) -> Option<&str> {
     let title = title.trim();
-    if !title.ends_with("/ X") {
-        return None;
-    }
+    network
+        .title_suffixes()
+        .iter()
+        .find_map(|suffix| title.strip_suffix(suffix))
+        .map(str::trim_end)
+}
+
+/// The unread count a site puts at the front of every real page title, or
+/// `None` when the title is one of the transient ones that carry no
+/// information and must not reset the badge.
+pub fn unread_from_title(network: Network, title: &str) -> Option<u32> {
+    let title = undecorated(network, title)?;
     let Some(rest) = title.strip_prefix('(') else {
         return Some(0);
     };
@@ -264,81 +316,33 @@ pub fn unread_from_title(title: &str) -> Option<u32> {
 
 /// "(3) Home / X" → "Home". The Twitter switch rewrites the suffix in the
 /// page, so that form is stripped too.
-pub fn clean_title(title: &str) -> String {
-    let mut title = title.trim();
+pub fn clean_title(network: Network, title: &str) -> String {
+    let mut title = undecorated(network, title).unwrap_or(title.trim());
     if title.starts_with('(')
         && let Some((_, rest)) = title.split_once(')')
     {
         title = rest.trim_start();
     }
-    title
-        .strip_suffix("/ X")
-        .or_else(|| title.strip_suffix("/ Twitter"))
-        .map_or(title, str::trim_end)
-        .to_string()
+    title.to_string()
 }
 
-pub fn section_for(url: &str, handle: Option<&str>) -> Section {
+pub fn section_for(network: Network, url: &str, handle: Option<&str>) -> Section {
     let Ok(parsed) = Url::parse(url) else {
         return Section::Other;
     };
-    let path = parsed.path().trim_end_matches('/');
-    match path {
-        "/home" | "" => Section::Home,
-        "/explore" | "/search" => Section::Explore,
-        "/notifications" => Section::Notifications,
-        // X redirects /i/bookmarks to /i/history, which is the same page.
-        "/i/bookmarks" | "/i/history" => Section::Bookmarks,
-        "/compose/post" => Section::Compose,
-        _ if path.starts_with("/explore/")
-            || path.starts_with("/search")
-            || path.starts_with("/i/trends") =>
-        {
-            Section::Explore
-        }
-        _ if path.starts_with("/notifications/") => Section::Notifications,
-        _ if path.starts_with("/messages") || path.starts_with("/i/chat") => Section::Messages,
-        _ => match handle {
-            Some(handle)
-                if path
-                    .strip_prefix('/')
-                    .is_some_and(|rest| rest.split('/').next() == Some(handle)) =>
-            {
-                Section::Profile
-            }
-            _ => Section::Other,
-        },
-    }
+    network.section_for(parsed.path(), handle)
 }
 
-pub fn destination_url(destination: Destination, handle: Option<&str>) -> Result<String> {
-    Ok(match destination {
-        Destination::Home => HOME.into(),
-        Destination::Explore => "https://x.com/explore".into(),
-        Destination::Notifications => "https://x.com/notifications".into(),
-        // X moved its messages to /i/chat; /messages still redirects there.
-        Destination::Messages => "https://x.com/i/chat".into(),
-        Destination::Bookmarks => "https://x.com/i/bookmarks".into(),
-        Destination::Compose => "https://x.com/compose/post".into(),
-        Destination::Profile => {
-            let handle = handle.ok_or_else(|| {
-                AppError::InvalidInput(
-                    "Twister has not seen your handle yet. Open X's home first.".into(),
-                )
-            })?;
-            format!("https://x.com/{handle}")
-        }
-    })
-}
-
-/// An X handle is 1–15 word characters. Anything else from the bridge is
-/// discarded — the page it runs on is not trusted.
-pub fn valid_handle(handle: &str) -> bool {
-    !handle.is_empty()
-        && handle.len() <= 15
-        && handle
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+pub fn destination_url(
+    network: Network,
+    destination: Destination,
+    handle: Option<&str>,
+) -> Result<String> {
+    Ok(format!(
+        "{}{}",
+        network.origin(),
+        network.destination_path(destination, handle)?
+    ))
 }
 
 /// Where the island goes for a window of this size. Never negative, so a
@@ -364,13 +368,15 @@ pub fn neighbour(ids: &[u32], closing: u32) -> Option<u32> {
         .copied()
 }
 
-fn init_script(prefs: &SitePrefs, user_styles: &[(String, String)]) -> String {
+fn init_script(network: Network, prefs: &SitePrefs, user_styles: &[(String, String)]) -> String {
+    let scripts = scripts(network);
     // Every substitution is JSON, which is valid JavaScript for a string, an
     // array and an object literal alike.
-    BRIDGE_JS
+    scripts
+        .bridge
         .replace(
             "__TWISTER_CSS__",
-            &serde_json::to_string(NICETIES_CSS).unwrap_or_else(|_| "\"\"".into()),
+            &serde_json::to_string(scripts.css).unwrap_or_else(|_| "\"\"".into()),
         )
         .replace(
             "__TWISTER_USER_CSS__",
@@ -406,7 +412,7 @@ fn prefs(app: &AppHandle) -> SitePrefs {
 // which tab each one speaks for.
 #[allow(clippy::too_many_lines)]
 pub fn open_tab(app: &AppHandle, window: &Window, url: &str, activate: bool) -> Result<u32> {
-    let start = tab_url(url)?;
+    let (start, network) = tab_url(url)?;
     let state = site(app);
     let count = state.site.tabs.lock().map_or(0, |t| t.len());
     if count >= MAX_TABS {
@@ -440,30 +446,33 @@ pub fn open_tab(app: &AppHandle, window: &Window, url: &str, activate: bool) -> 
     let load_handle = app.clone();
 
     let mut builder = WebviewBuilder::new(&label, WebviewUrl::External(start.clone()))
-        .initialization_script(init_script(&current_prefs, &assets.styles))
-        .initialization_script(CAPTURE_JS)
-        .initialization_script(OPS_JS);
+        .initialization_script(COMMON_JS)
+        .initialization_script(init_script(network, &current_prefs, &assets.styles))
+        .initialization_script(scripts(network).capture)
+        .initialization_script(scripts(network).ops);
     for (name, source) in &assets.scripts {
         builder = builder.initialization_script(userland::wrap_script(name, source));
     }
     let builder = builder
         .devtools(cfg!(debug_assertions))
         .on_navigation(move |url| {
-            if allows(url) {
+            if allows(network, url) {
                 return true;
             }
-            open_external(&nav_handle, url);
+            // A link from one network to another's page is a tab there,
+            // with that network's scripts; anything else leaves.
+            leave(&nav_handle, url);
             false
         })
         .on_new_window(move |url, _features| {
-            // A popup is either an X page — a new tab — or a link out. Either
-            // way no second window: a client is one frame.
-            if allows(&url) {
-                if let Err(err) = new_tab(&new_window_handle, Some(url.to_string())) {
+            // A popup is either a page of this network — a new tab — or a
+            // link out. Either way no second window: a client is one frame.
+            if allows(network, &url) {
+                if let Err(err) = new_tab(&new_window_handle, Some(url.to_string()), None) {
                     log::warn!("could not open {url} in a tab: {err}");
                 }
             } else {
-                open_external(&new_window_handle, &url);
+                leave(&new_window_handle, &url);
             }
             NewWindowResponse::Deny
         })
@@ -472,11 +481,11 @@ pub fn open_tab(app: &AppHandle, window: &Window, url: &str, activate: bool) -> 
                 return;
             };
             update_tab(&title_handle, id, |tab| {
-                let cleaned = clean_title(&title);
+                let cleaned = clean_title(network, &title);
                 if !cleaned.is_empty() {
                     tab.title = cleaned;
                 }
-                if let Some(unread) = unread_from_title(&title) {
+                if let Some(unread) = unread_from_title(network, &title) {
                     tab.unread = unread;
                 }
             });
@@ -494,9 +503,9 @@ pub fn open_tab(app: &AppHandle, window: &Window, url: &str, activate: bool) -> 
             if loading && active_id(&load_handle) == Some(id) {
                 ops::page_reloaded(&load_handle);
             }
-            let handle = current_handle(&load_handle);
+            let handle = current_handle(&load_handle, network);
             update_tab(&load_handle, id, |tab| {
-                tab.section = section_for(&url, handle.as_deref());
+                tab.section = section_for(network, &url, handle.as_deref());
                 tab.url = url;
                 tab.loading = loading;
             });
@@ -512,11 +521,14 @@ pub fn open_tab(app: &AppHandle, window: &Window, url: &str, activate: bool) -> 
         tabs.push(Tab {
             state: TabState {
                 id,
+                network,
                 url: start.to_string(),
-                section: section_for(start.as_str(), None),
+                section: section_for(network, start.as_str(), None),
                 loading: true,
                 ..TabState::default()
             },
+            min_width: 0.0,
+            last_active: 0,
         });
     }
     if activate || count == 0 {
@@ -528,9 +540,35 @@ pub fn open_tab(app: &AppHandle, window: &Window, url: &str, activate: bool) -> 
     Ok(id)
 }
 
-pub fn new_tab(app: &AppHandle, url: Option<String>) -> Result<u32> {
+/// A tab on `url`, or on `network`'s home, or on the front tab's network's
+/// home — the way ⌘T opens beside what is being read.
+pub fn new_tab(app: &AppHandle, url: Option<String>, network: Option<Network>) -> Result<u32> {
     let window = main_window(app)?;
-    open_tab(app, &window, url.as_deref().unwrap_or(HOME), true)
+    let url = url.unwrap_or_else(|| {
+        network
+            .or_else(|| active_network(app))
+            .unwrap_or_default()
+            .home()
+    });
+    open_tab(app, &window, &url, true)
+}
+
+/// Brings a network to the front: the tab that was last used there, or a
+/// new one on its home.
+pub fn activate_network(app: &AppHandle, network: Network) -> Result<u32> {
+    let recent = site(app).site.tabs.lock().ok().and_then(|tabs| {
+        tabs.iter()
+            .filter(|t| t.state.network == network)
+            .max_by_key(|t| t.last_active)
+            .map(|t| t.state.id)
+    });
+    match recent {
+        Some(id) => {
+            activate_tab(app, id)?;
+            Ok(id)
+        }
+        None => new_tab(app, None, Some(network)),
+    }
 }
 
 pub fn activate_tab(app: &AppHandle, id: u32) -> Result<()> {
@@ -540,6 +578,12 @@ pub fn activate_tab(app: &AppHandle, id: u32) -> Result<()> {
         return Err(AppError::NotFound("That tab is gone.".into()));
     }
     let previous = state.site.active.swap(id, Ordering::Relaxed);
+    let tick = state.site.activations.fetch_add(1, Ordering::Relaxed);
+    if let Ok(mut tabs) = state.site.tabs.lock()
+        && let Some(tab) = tabs.iter_mut().find(|t| t.state.id == id)
+    {
+        tab.last_active = tick;
+    }
     let visible = state.site.visible.load(Ordering::Relaxed);
     if previous != id
         && let Some(old) = app.get_webview(&label_for(previous))
@@ -555,6 +599,10 @@ pub fn activate_tab(app: &AppHandle, id: u32) -> Result<()> {
         }
     }
     push(app);
+    // The window's floor follows the page in front.
+    if let Err(err) = fit_window(app) {
+        log::debug!("fit skipped: {err}");
+    }
     Ok(())
 }
 
@@ -632,7 +680,7 @@ pub fn restore_tabs(app: &AppHandle, window: &Window, saved: &SavedTabs) -> Resu
         .take(MAX_TABS)
         .collect();
     if urls.is_empty() {
-        open_tab(app, window, HOME, true)?;
+        open_tab(app, window, &Network::default().home(), true)?;
         return Ok(());
     }
     let active = saved.active.min(urls.len() - 1);
@@ -681,8 +729,36 @@ fn active_id(app: &AppHandle) -> Option<u32> {
     (id != 0).then_some(id)
 }
 
-fn current_handle(app: &AppHandle) -> Option<String> {
-    site(app).site.handle.lock().ok().and_then(|h| h.clone())
+fn current_handle(app: &AppHandle, network: Network) -> Option<String> {
+    site(app)
+        .site
+        .handles
+        .lock()
+        .ok()
+        .and_then(|h| h.get(&network).cloned())
+}
+
+/// The signed-in handle on a network, if its bridge has seen one.
+pub fn handle_on(app: &AppHandle, network: Network) -> Option<String> {
+    current_handle(app, network)
+}
+
+fn tab_network(app: &AppHandle, id: u32) -> Option<Network> {
+    site(app).site.tabs.lock().ok().and_then(|tabs| {
+        tabs.iter()
+            .find(|t| t.state.id == id)
+            .map(|t| t.state.network)
+    })
+}
+
+/// The front tab's network, if there is a tab.
+pub fn active_network(app: &AppHandle) -> Option<Network> {
+    active_id(app).and_then(|id| tab_network(app, id))
+}
+
+/// Which network a webview label speaks for, for checking who is calling.
+pub fn network_of_label(app: &AppHandle, label: &str) -> Option<Network> {
+    id_from_label(label).and_then(|id| tab_network(app, id))
 }
 
 /// The active tab's webview label, for checking who is calling.
@@ -701,7 +777,6 @@ fn webview(app: &AppHandle) -> Result<Webview> {
 pub struct Snapshot {
     pub url: String,
     pub loading: bool,
-    pub handle: Option<String>,
 }
 
 pub fn current_state(app: &AppHandle) -> Option<Snapshot> {
@@ -710,7 +785,6 @@ pub fn current_state(app: &AppHandle) -> Option<Snapshot> {
     Some(Snapshot {
         url: tab.url.clone(),
         loading: tab.loading,
-        handle: snapshot.handle,
     })
 }
 
@@ -771,6 +845,18 @@ pub fn notify(app: &AppHandle, message: impl Into<String>) {
     );
 }
 
+/// A URL that is not this tab's to show: a tab of the network it belongs to
+/// when it is one of theirs, the system browser otherwise.
+fn leave(app: &AppHandle, url: &Url) {
+    if network::for_tab_url(url).is_some() {
+        match new_tab(app, Some(url.to_string()), None) {
+            Ok(_) => return,
+            Err(err) => log::warn!("could not open {url} in a tab: {err}"),
+        }
+    }
+    open_external(app, url);
+}
+
 fn open_external(app: &AppHandle, url: &Url) {
     match tauri_plugin_opener::open_url(url.as_str(), None::<&str>) {
         Ok(()) => notify(
@@ -790,7 +876,9 @@ fn open_external(app: &AppHandle, url: &Url) {
 /// A full load of `url` in the active tab.
 pub fn navigate(app: &AppHandle, url: &str) -> Result<()> {
     let parsed = Url::parse(url).map_err(|e| AppError::InvalidInput(format!("Bad URL: {e}")))?;
-    if !allows(&parsed) {
+    let network =
+        active_network(app).ok_or_else(|| AppError::NotFound("No tab is open.".into()))?;
+    if !allows(network, &parsed) {
         return Err(AppError::InvalidInput(format!(
             "{url} is not somewhere the site can go."
         )));
@@ -799,13 +887,16 @@ pub fn navigate(app: &AppHandle, url: &str) -> Result<()> {
     Ok(())
 }
 
-/// Sends the active tab to a destination through X's own navigation when the
-/// bridge is there to click it, and by a full load otherwise. The distinction
-/// is what keeps a sidebar click instant — and what makes the compose modal
-/// open at all: loaded cold, `/compose/post` never gets past X's splash.
+/// Sends the active tab to a destination through the site's own navigation
+/// when the bridge is there to click it, and by a full load otherwise. The
+/// distinction is what keeps a sidebar click instant — and what makes X's
+/// compose modal open at all: loaded cold, `/compose/post` never gets past
+/// X's splash.
 pub fn go(app: &AppHandle, destination: Destination) -> Result<()> {
-    let handle = current_handle(app);
-    let url = destination_url(destination, handle.as_deref())?;
+    let network =
+        active_network(app).ok_or_else(|| AppError::NotFound("No tab is open.".into()))?;
+    let handle = current_handle(app, network);
+    let url = destination_url(network, destination, handle.as_deref())?;
     let parsed = Url::parse(&url).map_err(|e| AppError::Internal(e.to_string()))?;
     let path = serde_json::to_string(parsed.path())?;
     let href = serde_json::to_string(&url)?;
@@ -815,10 +906,10 @@ pub fn go(app: &AppHandle, destination: Destination) -> Result<()> {
     )
 }
 
-/// Sends the active tab to an X path through the bridge, in-app.
+/// Sends the active tab to a path on its own site through the bridge, in-app.
 pub fn go_path(app: &AppHandle, path: &str) -> Result<()> {
     if !path.starts_with('/') || path.contains("//") {
-        return Err(AppError::InvalidInput("That is not an X path.".into()));
+        return Err(AppError::InvalidInput("That is not a site path.".into()));
     }
     let json = serde_json::to_string(path)?;
     eval(
@@ -915,13 +1006,15 @@ pub fn apply_prefs(app: &AppHandle, prefs: &SitePrefs) -> Result<()> {
     Ok(())
 }
 
-/// Forgets the X session: every cookie and every byte of site storage, then
-/// back to the front door in one tab.
+/// Forgets every session: the tabs share one data store, so every cookie
+/// and every byte of site storage for every network goes, then back to the
+/// front door of the front tab's network in one tab.
 pub fn sign_out(app: &AppHandle) -> Result<()> {
     let webview = webview(app)?;
+    let network = active_network(app).unwrap_or_default();
     webview.clear_all_browsing_data()?;
-    if let Ok(mut handle) = site(app).site.handle.lock() {
-        *handle = None;
+    if let Ok(mut handles) = site(app).site.handles.lock() {
+        handles.clear();
     }
     let active = active_id(app);
     for id in tab_ids(app) {
@@ -929,18 +1022,27 @@ pub fn sign_out(app: &AppHandle) -> Result<()> {
             close_tab(app, id)?;
         }
     }
-    webview.navigate(Url::parse(HOME).map_err(|e| AppError::Internal(e.to_string()))?)?;
+    webview
+        .navigate(Url::parse(&network.home()).map_err(|e| AppError::Internal(e.to_string()))?)?;
     push(app);
     Ok(())
 }
 
-/// The window has to be wide enough for X's own layout plus the frame around
-/// it. Applied as the minimum size, and as the size when the window is
-/// narrower than that right now — showing the right column again must not
-/// leave it cut off.
+/// The window has to be wide enough for the front page's own layout plus the
+/// frame around it. Applied as the minimum size, and as the size when the
+/// window is narrower than that right now — showing X's right column again
+/// must not leave it cut off.
 pub fn fit_window(app: &AppHandle) -> Result<()> {
     let window = main_window(app)?;
-    let content = site(app).site.content_min_width.lock().map_or(0.0, |w| *w);
+    let content = active_id(app)
+        .and_then(|active| {
+            site(app).site.tabs.lock().ok().and_then(|tabs| {
+                tabs.iter()
+                    .find(|t| t.state.id == active)
+                    .map(|t| t.min_width)
+            })
+        })
+        .unwrap_or(0.0);
     if content <= 0.0 {
         return Ok(());
     }
@@ -971,53 +1073,66 @@ pub fn bridge_navigated(app: &AppHandle, caller: &str, url: &str) {
     let Ok(parsed) = Url::parse(url) else {
         return;
     };
-    if !allows(&parsed) {
+    let Some(network) = tab_network(app, id) else {
+        return;
+    };
+    if !allows(network, &parsed) {
         return;
     }
     log::debug!("tab {id} in-app navigation: {url}");
-    let handle = current_handle(app);
+    let handle = current_handle(app, network);
     update_tab(app, id, |tab| {
-        tab.section = section_for(url, handle.as_deref());
+        tab.section = section_for(network, url, handle.as_deref());
         tab.url = url.to_string();
     });
 }
 
-pub fn bridge_profile(app: &AppHandle, handle: &str) -> Result<()> {
-    if !valid_handle(handle) {
-        return Err(AppError::InvalidInput("That is not an X handle.".into()));
+/// The page found the signed-in handle. It counts for the calling tab's
+/// network only, and is checked against that network's rule.
+pub fn bridge_profile(app: &AppHandle, caller: &str, handle: &str) -> Result<()> {
+    let network = network_of_label(app, caller)
+        .ok_or_else(|| AppError::NotFound("That tab is gone.".into()))?;
+    if !network.valid_handle(handle) {
+        return Err(AppError::InvalidInput(format!(
+            "That is not a {} handle.",
+            network.name()
+        )));
     }
-    if let Ok(mut current) = site(app).site.handle.lock() {
-        *current = Some(handle.to_string());
+    if let Ok(mut handles) = site(app).site.handles.lock() {
+        handles.insert(network, handle.to_string());
     }
     if let Ok(mut tabs) = site(app).site.tabs.lock() {
-        for tab in tabs.iter_mut() {
-            tab.state.section = section_for(&tab.state.url, Some(handle));
+        for tab in tabs.iter_mut().filter(|t| t.state.network == network) {
+            tab.state.section = section_for(network, &tab.state.url, Some(handle));
         }
     }
     push(app);
     Ok(())
 }
 
-/// The bridge measured how wide X's layout wants to be in this tab.
+/// The bridge measured how wide its page's layout wants to be in this tab.
 pub fn bridge_layout(app: &AppHandle, caller: &str, min_width: f64) -> Result<()> {
     if !min_width.is_finite() || !(0.0..=4000.0).contains(&min_width) {
         return Err(AppError::InvalidInput("That is not a width.".into()));
     }
-    if id_from_label(caller) != active_id(app) {
+    let Some(id) = id_from_label(caller) else {
         return Ok(());
-    }
+    };
     let changed = {
         let state = site(app);
-        let mut current = state
+        let mut tabs = state
             .site
-            .content_min_width
+            .tabs
             .lock()
-            .map_err(|_| AppError::Internal("Width lock poisoned.".into()))?;
-        let changed = (*current - min_width).abs() > 0.5;
-        *current = min_width;
+            .map_err(|_| AppError::Internal("Tabs lock poisoned.".into()))?;
+        let Some(tab) = tabs.iter_mut().find(|t| t.state.id == id) else {
+            return Ok(());
+        };
+        let changed = (tab.min_width - min_width).abs() > 0.5;
+        tab.min_width = min_width;
         changed
     };
-    if changed {
+    if changed && Some(id) == active_id(app) {
         log::debug!("tab {caller} wants {min_width}px of island");
         fit_window(app)?;
     }
@@ -1033,27 +1148,62 @@ mod tests {
     }
 
     #[test]
-    fn allowlist_covers_x_and_its_sign_in_frames_only() {
-        assert!(allows(&url("https://x.com/home")));
-        assert!(allows(&url("https://twitter.com/home")));
-        assert!(allows(&url("https://api.x.com/graphql")));
-        assert!(allows(&url("https://pbs.twimg.com/media/a.jpg")));
-        assert!(allows(&url("https://t.co/abc")));
-        assert!(allows(&url("https://accounts.google.com/gsi/button")));
-        assert!(allows(&url("about:blank")));
-        assert!(allows(&url("about:srcdoc")));
-        assert!(!allows(&url("https://example.com/")));
-        assert!(!allows(&url("https://notx.com/")));
-        assert!(!allows(&url("https://x.com.evil.example/")));
-        assert!(!allows(&url("https://google.com/")));
-        assert!(!allows(&url("mailto:a@b.c")));
-        assert!(!allows(&url("ftp://x.com/")));
+    fn allowlist_covers_the_networks_site_and_its_sign_in_frames_only() {
+        assert!(allows(Network::X, &url("https://x.com/home")));
+        assert!(allows(Network::X, &url("https://twitter.com/home")));
+        assert!(allows(Network::X, &url("https://api.x.com/graphql")));
+        assert!(allows(
+            Network::X,
+            &url("https://pbs.twimg.com/media/a.jpg")
+        ));
+        assert!(allows(Network::X, &url("https://t.co/abc")));
+        assert!(allows(
+            Network::X,
+            &url("https://accounts.google.com/gsi/button")
+        ));
+        assert!(allows(Network::X, &url("about:blank")));
+        assert!(allows(Network::X, &url("about:srcdoc")));
+        assert!(!allows(Network::X, &url("https://example.com/")));
+        assert!(!allows(Network::X, &url("https://notx.com/")));
+        assert!(!allows(Network::X, &url("https://x.com.evil.example/")));
+        assert!(!allows(Network::X, &url("https://google.com/")));
+        assert!(!allows(Network::X, &url("mailto:a@b.c")));
+        assert!(!allows(Network::X, &url("ftp://x.com/")));
+        // A Bluesky link inside an X tab leaves the tab — for a Bluesky tab.
+        assert!(!allows(
+            Network::X,
+            &url("https://bsky.app/profile/bsky.app")
+        ));
+        assert!(allows(
+            Network::Bluesky,
+            &url("https://bsky.app/profile/bsky.app")
+        ));
     }
 
     #[test]
-    fn tabs_open_on_x_only() {
-        assert!(tab_url("https://x.com/i/bookmarks").is_ok());
-        assert!(tab_url("https://twitter.com/home").is_ok());
+    fn tabs_open_on_a_networks_site_only() {
+        assert_eq!(
+            tab_url("https://x.com/i/bookmarks").expect("ok").1,
+            Network::X
+        );
+        assert_eq!(
+            tab_url("https://twitter.com/home").expect("ok").1,
+            Network::X
+        );
+        assert_eq!(
+            tab_url("https://bsky.app/notifications").expect("ok").1,
+            Network::Bluesky
+        );
+        assert_eq!(
+            tab_url("https://www.threads.com/").expect("ok").1,
+            Network::Threads
+        );
+        assert_eq!(
+            tab_url("https://www.instagram.com/direct/inbox/")
+                .expect("ok")
+                .1,
+            Network::Instagram
+        );
         assert!(tab_url("https://t.co/abc").is_err());
         assert!(tab_url("http://x.com/home").is_err());
         assert!(tab_url("https://pbs.twimg.com/a.jpg").is_err());
@@ -1079,99 +1229,98 @@ mod tests {
 
     #[test]
     fn unread_is_read_from_real_titles_only() {
-        assert_eq!(unread_from_title("(3) Home / X"), Some(3));
-        assert_eq!(unread_from_title("(12) Notifications / X"), Some(12));
-        assert_eq!(unread_from_title("Home / X"), Some(0));
-        assert_eq!(unread_from_title("X. It’s what’s happening / X"), Some(0));
-        assert_eq!(unread_from_title("X"), None);
-        assert_eq!(unread_from_title(""), None);
-        assert_eq!(unread_from_title("X - The Everything App / X"), Some(0));
-        assert_eq!(unread_from_title("(lots) Home / X"), None);
+        let x = Network::X;
+        assert_eq!(unread_from_title(x, "(3) Home / X"), Some(3));
+        assert_eq!(unread_from_title(x, "(12) Notifications / X"), Some(12));
+        assert_eq!(unread_from_title(x, "Home / X"), Some(0));
+        assert_eq!(
+            unread_from_title(x, "X. It’s what’s happening / X"),
+            Some(0)
+        );
+        assert_eq!(unread_from_title(x, "X"), None);
+        assert_eq!(unread_from_title(x, ""), None);
+        assert_eq!(unread_from_title(x, "X - The Everything App / X"), Some(0));
+        assert_eq!(unread_from_title(x, "(lots) Home / X"), None);
+        assert_eq!(
+            unread_from_title(Network::Bluesky, "(2) Notifications — Bluesky"),
+            Some(2)
+        );
+        assert_eq!(unread_from_title(Network::Bluesky, "Bluesky"), None);
+        assert_eq!(
+            unread_from_title(
+                Network::Threads,
+                "Mark Zuckerberg (@zuck) • Threads, Say more"
+            ),
+            Some(0)
+        );
     }
 
     #[test]
     fn titles_lose_their_decoration() {
-        assert_eq!(clean_title("(3) Home / X"), "Home");
-        assert_eq!(clean_title("Home / X"), "Home");
-        assert_eq!(clean_title("(2) Home / Twitter"), "Home");
-        assert_eq!(clean_title("Dominikos (@dom) / X"), "Dominikos (@dom)");
-        assert_eq!(clean_title("X"), "X");
-        assert_eq!(clean_title(""), "");
+        let x = Network::X;
+        assert_eq!(clean_title(x, "(3) Home / X"), "Home");
+        assert_eq!(clean_title(x, "Home / X"), "Home");
+        assert_eq!(clean_title(x, "(2) Home / Twitter"), "Home");
+        assert_eq!(clean_title(x, "Dominikos (@dom) / X"), "Dominikos (@dom)");
+        assert_eq!(clean_title(x, "X"), "X");
+        assert_eq!(clean_title(x, ""), "");
+        assert_eq!(
+            clean_title(Network::Bluesky, "Bluesky (@bsky.app) — Bluesky"),
+            "Bluesky (@bsky.app)"
+        );
+        assert_eq!(
+            clean_title(
+                Network::Threads,
+                "Mark Zuckerberg (@zuck) • Threads, Say more"
+            ),
+            "Mark Zuckerberg (@zuck)"
+        );
+        assert_eq!(
+            clean_title(
+                Network::Instagram,
+                "Instagram (@instagram) • Instagram photos and videos"
+            ),
+            "Instagram (@instagram)"
+        );
+        assert_eq!(clean_title(Network::Instagram, "Instagram"), "Instagram");
     }
 
     #[test]
-    fn sections_follow_paths_and_the_known_handle() {
-        assert_eq!(section_for("https://x.com/home", None), Section::Home);
-        assert_eq!(section_for("https://x.com/", None), Section::Home);
-        assert_eq!(section_for("https://x.com/explore", None), Section::Explore);
+    fn sections_come_from_the_network_and_the_url() {
         assert_eq!(
-            section_for("https://x.com/explore/tabs/news", None),
-            Section::Explore
+            section_for(Network::X, "https://x.com/home", None),
+            Section::Home
         );
         assert_eq!(
-            section_for("https://x.com/search?q=rust", None),
-            Section::Explore
-        );
-        assert_eq!(
-            section_for("https://x.com/notifications", None),
-            Section::Notifications
-        );
-        assert_eq!(
-            section_for("https://x.com/notifications/mentions", None),
-            Section::Notifications
-        );
-        assert_eq!(
-            section_for("https://x.com/messages/123", None),
-            Section::Messages
-        );
-        assert_eq!(section_for("https://x.com/i/chat", None), Section::Messages);
-        assert_eq!(
-            section_for("https://x.com/i/bookmarks", None),
-            Section::Bookmarks
-        );
-        assert_eq!(
-            section_for("https://x.com/i/history", None),
-            Section::Bookmarks
-        );
-        assert_eq!(
-            section_for("https://x.com/compose/post", None),
-            Section::Compose
-        );
-        assert_eq!(section_for("https://x.com/dom", None), Section::Other);
-        assert_eq!(
-            section_for("https://x.com/dom", Some("dom")),
+            section_for(Network::X, "https://x.com/dom", Some("dom")),
             Section::Profile
         );
         assert_eq!(
-            section_for("https://x.com/dom/with_replies", Some("dom")),
-            Section::Profile
+            section_for(Network::Bluesky, "https://bsky.app/saved", None),
+            Section::Bookmarks
         );
         assert_eq!(
-            section_for("https://x.com/someone", Some("dom")),
+            section_for(Network::X, "not a url", Some("dom")),
             Section::Other
         );
-        assert_eq!(section_for("not a url", Some("dom")), Section::Other);
     }
 
     #[test]
-    fn destinations_need_a_handle_only_for_profile() {
-        assert_eq!(destination_url(Destination::Home, None).expect("ok"), HOME);
-        assert!(destination_url(Destination::Profile, None).is_err());
+    fn destinations_are_full_urls_on_the_networks_origin() {
         assert_eq!(
-            destination_url(Destination::Profile, Some("dom")).expect("ok"),
+            destination_url(Network::X, Destination::Home, None).expect("ok"),
+            "https://x.com/home"
+        );
+        assert!(destination_url(Network::X, Destination::Profile, None).is_err());
+        assert_eq!(
+            destination_url(Network::X, Destination::Profile, Some("dom")).expect("ok"),
             "https://x.com/dom"
         );
-    }
-
-    #[test]
-    fn handles_are_validated() {
-        assert!(valid_handle("dom_314"));
-        assert!(valid_handle("a"));
-        assert!(!valid_handle(""));
-        assert!(!valid_handle("sixteen_chars_xx"));
-        assert!(!valid_handle("has space"));
-        assert!(!valid_handle("../etc"));
-        assert!(!valid_handle("émoji"));
+        assert_eq!(
+            destination_url(Network::Bluesky, Destination::Compose, None).expect("ok"),
+            "https://bsky.app/intent/compose"
+        );
+        assert!(destination_url(Network::Instagram, Destination::Compose, None).is_err());
     }
 
     #[test]
@@ -1194,23 +1343,39 @@ mod tests {
     }
 
     #[test]
-    fn init_script_carries_css_and_prefs_as_json() {
+    fn init_script_carries_css_and_prefs_as_json_for_every_network() {
         let prefs = SitePrefs {
             niceties: crate::settings::Niceties::default(),
             font: "Inter".into(),
             text_size: "normal".into(),
         };
-        let script = init_script(
-            &prefs,
-            &[("dim.css".to_string(), "html{color:red}".to_string())],
-        );
-        assert!(!script.contains("__TWISTER_CSS__"));
-        assert!(!script.contains("__TWISTER_NICETIES__"));
-        assert!(!script.contains("__TWISTER_USER_CSS__"));
-        assert!(script.contains("[[\"dim.css\",\"html{color:red}\"]]"));
-        assert!(script.contains("\"chronologicalHome\":true"));
-        assert!(script.contains("\"font\":\"Inter\""));
-        assert!(script.contains("data-twister-hide-promoted"));
+        for network in crate::network::ALL {
+            let script = init_script(
+                *network,
+                &prefs,
+                &[("dim.css".to_string(), "html{color:red}".to_string())],
+            );
+            assert!(!script.contains("__TWISTER_CSS__"), "{network:?}");
+            assert!(!script.contains("__TWISTER_NICETIES__"), "{network:?}");
+            assert!(!script.contains("__TWISTER_USER_CSS__"), "{network:?}");
+            assert!(script.contains("[[\"dim.css\",\"html{color:red}\"]]"));
+            assert!(script.contains("\"chronologicalHome\":true"));
+            assert!(script.contains("\"font\":\"Inter\""));
+        }
+        assert!(init_script(Network::X, &prefs, &[]).contains("data-twister-hide-promoted"));
+    }
+
+    #[test]
+    fn site_state_keys_handles_by_slug() {
+        let mut handles = BTreeMap::new();
+        handles.insert(Network::Bluesky, "a.bsky.social".to_string());
+        let state = SiteState {
+            handles,
+            ..SiteState::default()
+        };
+        let json = serde_json::to_value(&state).expect("json");
+        assert_eq!(json["handles"]["bluesky"], "a.bsky.social");
+        assert!(json["handles"]["x"].is_null());
     }
 
     #[test]

@@ -1,11 +1,14 @@
 //! The store: one SQLite file holding everything the capture hook has seen —
-//! people and posts X itself loaded into the page — plus the job ledger and
-//! the scheduled posts.
+//! people and posts a site itself loaded into the page — plus the job
+//! ledger and the scheduled posts.
 //!
-//! Nothing here is fetched. Twister never calls X's API; the page does, and
-//! the hook copies what comes back. That is why every row carries a `source`
-//! (the GraphQL operation X used, `Following`, `Bookmarks`, `UserTweets`…)
-//! and a `last_seen`: a row is evidence of what the page showed, when.
+//! Nothing here is fetched. Twister never calls a network's API; the page
+//! does, and the hook copies what comes back. That is why every row carries
+//! a `network`, a `source` (the operation the page used: X's `Following`,
+//! Bluesky's `app.bsky.feed.getAuthorFeed`, Meta's query names) and a
+//! `last_seen`: a row is evidence of what the page showed, when. Ids are
+//! only unique within a network — X and Meta both hand out numbers — so a
+//! person or a post is keyed by both.
 //!
 //! WAL, so the MCP binary can read and write alongside the running app.
 
@@ -16,8 +19,9 @@ use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::T
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result, internal};
+use crate::network::Network;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 pub const DB_FILE: &str = "twister.sqlite3";
 
@@ -26,6 +30,7 @@ pub const DB_FILE: &str = "twister.sqlite3";
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct User {
+    pub network: Network,
     pub id: String,
     pub handle: String,
     pub name: String,
@@ -61,7 +66,11 @@ pub struct Media {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Post {
+    pub network: Network,
     pub id: String,
+    /// The short id the network's URLs carry when it is not `id` itself:
+    /// Meta's shortcode. Empty on X and Bluesky.
+    pub slug: String,
     pub author_id: String,
     pub author_handle: String,
     pub text: String,
@@ -84,9 +93,16 @@ pub struct Post {
     pub last_seen: String,
 }
 
+impl User {
+    pub fn url(&self) -> String {
+        self.network.profile_url(&self.handle)
+    }
+}
+
 impl Post {
     pub fn url(&self) -> String {
-        format!("https://x.com/{}/status/{}", self.author_handle, self.id)
+        self.network
+            .post_url(&self.author_handle, &self.id, &self.slug)
     }
 }
 
@@ -95,6 +111,7 @@ impl Post {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct UserFilter {
+    pub network: Option<Network>,
     /// Matched against handle, name and bio, case-insensitively.
     pub search: String,
     pub source: Option<String>,
@@ -112,6 +129,7 @@ pub struct UserFilter {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PostFilter {
+    pub network: Option<Network>,
     pub search: String,
     pub source: Option<String>,
     pub kind: Option<String>,
@@ -132,6 +150,7 @@ pub struct PostFilter {
 #[serde(rename_all = "camelCase", default)]
 pub struct Job {
     pub id: i64,
+    pub network: Network,
     pub kind: String,
     /// JSON, as given to the runner.
     pub params: String,
@@ -153,6 +172,7 @@ pub struct Job {
 #[serde(rename_all = "camelCase", default)]
 pub struct ScheduledPost {
     pub id: i64,
+    pub network: Network,
     /// The thread, one string per post.
     pub parts: Vec<String>,
     /// RFC 3339.
@@ -169,6 +189,14 @@ pub struct Counts {
     pub users: i64,
     pub posts: i64,
     pub sources: Vec<(String, i64)>,
+    /// Rows per network, most first — over everything, whatever the filter.
+    pub networks: Vec<(String, i64)>,
+}
+
+/// A network as a column value, and back. A row from before networks, or
+/// one a newer build wrote for a network this one lacks, reads as X.
+fn network_column(slug: &str) -> Network {
+    Network::parse(slug).unwrap_or_default()
 }
 
 pub struct Db {
@@ -249,11 +277,11 @@ impl Db {
         let seen = now();
         for user in users {
             tx.execute(
-                "INSERT INTO users (id, handle, name, bio, location, website, followers, following,
-                    posts, verified, protected, avatar, created_at, follows_me, followed_by_me,
-                    source, first_seen, last_seen)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17)
-                 ON CONFLICT(id) DO UPDATE SET
+                "INSERT INTO users (network, id, handle, name, bio, location, website, followers,
+                    following, posts, verified, protected, avatar, created_at, follows_me,
+                    followed_by_me, source, first_seen, last_seen)
+                 VALUES (?18, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17)
+                 ON CONFLICT(network, id) DO UPDATE SET
                     handle = excluded.handle, name = excluded.name, bio = excluded.bio,
                     location = excluded.location, website = excluded.website,
                     followers = excluded.followers, following = excluded.following,
@@ -281,6 +309,7 @@ impl Db {
                     user.followed_by_me,
                     user.source,
                     seen,
+                    user.network.slug(),
                 ],
             )?;
         }
@@ -294,11 +323,12 @@ impl Db {
         let seen = now();
         for post in posts {
             tx.execute(
-                "INSERT INTO posts (id, author_id, author_handle, text, created_at, kind, lang,
-                    likes, reposts, replies, views, bookmarked, media, repost_of, reply_to,
-                    quoted_id, source, first_seen, last_seen)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)
-                 ON CONFLICT(id) DO UPDATE SET
+                "INSERT INTO posts (network, slug, id, author_id, author_handle, text, created_at,
+                    kind, lang, likes, reposts, replies, views, bookmarked, media, repost_of,
+                    reply_to, quoted_id, source, first_seen, last_seen)
+                 VALUES (?19, ?20, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)
+                 ON CONFLICT(network, id) DO UPDATE SET
+                    slug = CASE WHEN excluded.slug = '' THEN posts.slug ELSE excluded.slug END,
                     author_id = excluded.author_id, author_handle = excluded.author_handle,
                     text = excluded.text, created_at = excluded.created_at, kind = excluded.kind,
                     lang = excluded.lang, likes = excluded.likes, reposts = excluded.reposts,
@@ -329,6 +359,8 @@ impl Db {
                     post.quoted_id,
                     post.source,
                     seen,
+                    post.network.slug(),
+                    post.slug,
                 ],
             )?;
         }
@@ -338,22 +370,43 @@ impl Db {
 
     // ─── Reads ──────────────────────────────────────────────────────────────
 
-    pub fn counts(&self) -> Result<Counts> {
+    /// How much is stored, on one network or on all of them.
+    pub fn counts(&self, network: Option<Network>) -> Result<Counts> {
         let conn = self.lock();
-        let users = conn.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))?;
-        let posts = conn.query_row("SELECT COUNT(*) FROM posts", [], |row| row.get(0))?;
+        // `?1` is the slug, or an empty string for everything.
+        let scope = network.map_or(String::new(), |n| n.slug().to_string());
+        let users = conn.query_row(
+            "SELECT COUNT(*) FROM users WHERE ?1 = '' OR network = ?1",
+            params![scope],
+            |row| row.get(0),
+        )?;
+        let posts = conn.query_row(
+            "SELECT COUNT(*) FROM posts WHERE ?1 = '' OR network = ?1",
+            params![scope],
+            |row| row.get(0),
+        )?;
         let mut statement = conn.prepare(
             "SELECT source, COUNT(*) AS n FROM (
-                SELECT source FROM users UNION ALL SELECT source FROM posts
+                SELECT source FROM users WHERE ?1 = '' OR network = ?1
+                UNION ALL SELECT source FROM posts WHERE ?1 = '' OR network = ?1
              ) GROUP BY source ORDER BY n DESC",
         )?;
         let sources = statement
+            .query_map(params![scope], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut statement = conn.prepare(
+            "SELECT network, COUNT(*) AS n FROM (
+                SELECT network FROM users UNION ALL SELECT network FROM posts
+             ) GROUP BY network ORDER BY n DESC",
+        )?;
+        let networks = statement
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(Counts {
             users,
             posts,
             sources,
+            networks,
         })
     }
 
@@ -367,35 +420,14 @@ impl Db {
         let sql = format!(
             "SELECT id, handle, name, bio, location, website, followers, following, posts,
                 verified, protected, avatar, created_at, follows_me, followed_by_me, source,
-                first_seen, last_seen
+                first_seen, last_seen, network
              FROM users WHERE {} ORDER BY {order} LIMIT {}",
             clauses.join(" AND "),
             limit_of(filter.limit)
         );
         let conn = self.lock();
         let mut statement = conn.prepare(&sql)?;
-        let rows = statement.query_map(params_from_iter(values.iter()), |row| {
-            Ok(User {
-                id: row.get(0)?,
-                handle: row.get(1)?,
-                name: row.get(2)?,
-                bio: row.get(3)?,
-                location: row.get(4)?,
-                website: row.get(5)?,
-                followers: row.get(6)?,
-                following: row.get(7)?,
-                posts: row.get(8)?,
-                verified: row.get(9)?,
-                protected: row.get(10)?,
-                avatar: row.get(11)?,
-                created_at: row.get(12)?,
-                follows_me: row.get(13)?,
-                followed_by_me: row.get(14)?,
-                source: row.get(15)?,
-                first_seen: row.get(16)?,
-                last_seen: row.get(17)?,
-            })
-        })?;
+        let rows = statement.query_map(params_from_iter(values.iter()), user_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
@@ -409,73 +441,27 @@ impl Db {
         let sql = format!(
             "SELECT id, author_id, author_handle, text, created_at, kind, lang, likes, reposts,
                 replies, views, bookmarked, media, repost_of, reply_to, quoted_id, source,
-                first_seen, last_seen
+                first_seen, last_seen, network, slug
              FROM posts WHERE {} ORDER BY {order} LIMIT {}",
             clauses.join(" AND "),
             limit_of(filter.limit)
         );
         let conn = self.lock();
         let mut statement = conn.prepare(&sql)?;
-        let rows = statement.query_map(params_from_iter(values.iter()), |row| {
-            let media: String = row.get(12)?;
-            Ok(Post {
-                id: row.get(0)?,
-                author_id: row.get(1)?,
-                author_handle: row.get(2)?,
-                text: row.get(3)?,
-                created_at: row.get(4)?,
-                kind: row.get(5)?,
-                lang: row.get(6)?,
-                likes: row.get(7)?,
-                reposts: row.get(8)?,
-                replies: row.get(9)?,
-                views: row.get(10)?,
-                bookmarked: row.get(11)?,
-                media: serde_json::from_str(&media).unwrap_or_default(),
-                repost_of: row.get(13)?,
-                reply_to: row.get(14)?,
-                quoted_id: row.get(15)?,
-                source: row.get(16)?,
-                first_seen: row.get(17)?,
-                last_seen: row.get(18)?,
-            })
-        })?;
+        let rows = statement.query_map(params_from_iter(values.iter()), post_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
-    pub fn post(&self, id: &str) -> Result<Option<Post>> {
+    pub fn post(&self, network: Network, id: &str) -> Result<Option<Post>> {
         let conn = self.lock();
         let found = conn
             .query_row(
                 "SELECT id, author_id, author_handle, text, created_at, kind, lang, likes, reposts,
                     replies, views, bookmarked, media, repost_of, reply_to, quoted_id, source,
-                    first_seen, last_seen
-                 FROM posts WHERE id = ?1",
-                params![id],
-                |row| {
-                    let media: String = row.get(12)?;
-                    Ok(Post {
-                        id: row.get(0)?,
-                        author_id: row.get(1)?,
-                        author_handle: row.get(2)?,
-                        text: row.get(3)?,
-                        created_at: row.get(4)?,
-                        kind: row.get(5)?,
-                        lang: row.get(6)?,
-                        likes: row.get(7)?,
-                        reposts: row.get(8)?,
-                        replies: row.get(9)?,
-                        views: row.get(10)?,
-                        bookmarked: row.get(11)?,
-                        media: serde_json::from_str(&media).unwrap_or_default(),
-                        repost_of: row.get(13)?,
-                        reply_to: row.get(14)?,
-                        quoted_id: row.get(15)?,
-                        source: row.get(16)?,
-                        first_seen: row.get(17)?,
-                        last_seen: row.get(18)?,
-                    })
-                },
+                    first_seen, last_seen, network, slug
+                 FROM posts WHERE network = ?1 AND id = ?2",
+                params![network.slug(), id],
+                post_row,
             )
             .optional()?;
         Ok(found)
@@ -488,12 +474,15 @@ impl Db {
         Ok(())
     }
 
-    pub fn remove_posts(&self, ids: &[String]) -> Result<usize> {
+    pub fn remove_posts(&self, network: Network, ids: &[String]) -> Result<usize> {
         let mut conn = self.lock();
         let tx = conn.transaction()?;
         let mut removed = 0;
         for id in ids {
-            removed += tx.execute("DELETE FROM posts WHERE id = ?1", params![id])?;
+            removed += tx.execute(
+                "DELETE FROM posts WHERE network = ?1 AND id = ?2",
+                params![network.slug(), id],
+            )?;
         }
         tx.commit()?;
         Ok(removed)
@@ -503,6 +492,7 @@ impl Db {
 
     pub fn create_job(
         &self,
+        network: Network,
         kind: &str,
         params_json: &str,
         dry_run: bool,
@@ -510,9 +500,9 @@ impl Db {
     ) -> Result<Job> {
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO jobs (kind, params, status, dry_run, origin, created_at)
-             VALUES (?1, ?2, 'queued', ?3, ?4, ?5)",
-            params![kind, params_json, dry_run, origin, now()],
+            "INSERT INTO jobs (network, kind, params, status, dry_run, origin, created_at)
+             VALUES (?6, ?1, ?2, 'queued', ?3, ?4, ?5)",
+            params![kind, params_json, dry_run, origin, now(), network.slug()],
         )?;
         let id = conn.last_insert_rowid();
         drop(conn);
@@ -525,7 +515,7 @@ impl Db {
         Ok(conn
             .query_row(
                 "SELECT id, kind, params, status, dry_run, total, done, skipped, failed, message,
-                    origin, created_at, finished_at FROM jobs WHERE id = ?1",
+                    origin, created_at, finished_at, network FROM jobs WHERE id = ?1",
                 params![id],
                 job_row,
             )
@@ -536,7 +526,7 @@ impl Db {
         let conn = self.lock();
         let mut statement = conn.prepare(
             "SELECT id, kind, params, status, dry_run, total, done, skipped, failed, message,
-                origin, created_at, finished_at FROM jobs ORDER BY id DESC LIMIT ?1",
+                origin, created_at, finished_at, network FROM jobs ORDER BY id DESC LIMIT ?1",
         )?;
         let rows = statement.query_map(params![limit], job_row)?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -549,7 +539,7 @@ impl Db {
         Ok(conn
             .query_row(
                 "SELECT id, kind, params, status, dry_run, total, done, skipped, failed, message,
-                    origin, created_at, finished_at
+                    origin, created_at, finished_at, network
                  FROM jobs WHERE status = 'queued' ORDER BY id ASC LIMIT 1",
                 [],
                 job_row,
@@ -588,12 +578,22 @@ impl Db {
 
     // ─── Scheduled posts ────────────────────────────────────────────────────
 
-    pub fn schedule_post(&self, parts: &[String], scheduled_at: &str) -> Result<ScheduledPost> {
+    pub fn schedule_post(
+        &self,
+        network: Network,
+        parts: &[String],
+        scheduled_at: &str,
+    ) -> Result<ScheduledPost> {
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO scheduled_posts (parts, scheduled_at, status, created_at)
-             VALUES (?1, ?2, 'scheduled', ?3)",
-            params![serde_json::to_string(parts)?, scheduled_at, now()],
+            "INSERT INTO scheduled_posts (network, parts, scheduled_at, status, created_at)
+             VALUES (?4, ?1, ?2, 'scheduled', ?3)",
+            params![
+                serde_json::to_string(parts)?,
+                scheduled_at,
+                now(),
+                network.slug()
+            ],
         )?;
         let id = conn.last_insert_rowid();
         drop(conn);
@@ -605,7 +605,7 @@ impl Db {
         let conn = self.lock();
         Ok(conn
             .query_row(
-                "SELECT id, parts, scheduled_at, status, error, created_at
+                "SELECT id, parts, scheduled_at, status, error, created_at, network
                  FROM scheduled_posts WHERE id = ?1",
                 params![id],
                 scheduled_row,
@@ -616,7 +616,7 @@ impl Db {
     pub fn scheduled_posts(&self) -> Result<Vec<ScheduledPost>> {
         let conn = self.lock();
         let mut statement = conn.prepare(
-            "SELECT id, parts, scheduled_at, status, error, created_at
+            "SELECT id, parts, scheduled_at, status, error, created_at, network
              FROM scheduled_posts ORDER BY scheduled_at DESC LIMIT 200",
         )?;
         let rows = statement.query_map([], scheduled_row)?;
@@ -675,9 +675,64 @@ impl Db {
     }
 }
 
+fn user_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
+    let network: String = row.get(18)?;
+    Ok(User {
+        network: network_column(&network),
+        id: row.get(0)?,
+        handle: row.get(1)?,
+        name: row.get(2)?,
+        bio: row.get(3)?,
+        location: row.get(4)?,
+        website: row.get(5)?,
+        followers: row.get(6)?,
+        following: row.get(7)?,
+        posts: row.get(8)?,
+        verified: row.get(9)?,
+        protected: row.get(10)?,
+        avatar: row.get(11)?,
+        created_at: row.get(12)?,
+        follows_me: row.get(13)?,
+        followed_by_me: row.get(14)?,
+        source: row.get(15)?,
+        first_seen: row.get(16)?,
+        last_seen: row.get(17)?,
+    })
+}
+
+fn post_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Post> {
+    let media: String = row.get(12)?;
+    let network: String = row.get(19)?;
+    Ok(Post {
+        network: network_column(&network),
+        id: row.get(0)?,
+        slug: row.get(20)?,
+        author_id: row.get(1)?,
+        author_handle: row.get(2)?,
+        text: row.get(3)?,
+        created_at: row.get(4)?,
+        kind: row.get(5)?,
+        lang: row.get(6)?,
+        likes: row.get(7)?,
+        reposts: row.get(8)?,
+        replies: row.get(9)?,
+        views: row.get(10)?,
+        bookmarked: row.get(11)?,
+        media: serde_json::from_str(&media).unwrap_or_default(),
+        repost_of: row.get(13)?,
+        reply_to: row.get(14)?,
+        quoted_id: row.get(15)?,
+        source: row.get(16)?,
+        first_seen: row.get(17)?,
+        last_seen: row.get(18)?,
+    })
+}
+
 fn job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
+    let network: String = row.get(13)?;
     Ok(Job {
         id: row.get(0)?,
+        network: network_column(&network),
         kind: row.get(1)?,
         params: row.get(2)?,
         status: row.get(3)?,
@@ -695,8 +750,10 @@ fn job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
 
 fn scheduled_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledPost> {
     let parts: String = row.get(1)?;
+    let network: String = row.get(6)?;
     Ok(ScheduledPost {
         id: row.get(0)?,
+        network: network_column(&network),
         parts: serde_json::from_str(&parts).unwrap_or_default(),
         scheduled_at: row.get(2)?,
         status: row.get(3)?,
@@ -746,6 +803,9 @@ impl Where {
 
 fn user_clauses(filter: &UserFilter) -> Clauses {
     let mut w = Where::default();
+    if let Some(network) = filter.network {
+        w.push("network = ?", Box::new(network.slug()));
+    }
     let search = filter.search.trim();
     if !search.is_empty() {
         w.push(
@@ -781,6 +841,9 @@ fn user_clauses(filter: &UserFilter) -> Clauses {
 
 fn post_clauses(filter: &PostFilter) -> Clauses {
     let mut w = Where::default();
+    if let Some(network) = filter.network {
+        w.push("network = ?", Box::new(network.slug()));
+    }
     let search = filter.search.trim();
     if !search.is_empty() {
         w.push("text LIKE ? ESCAPE '\\'", Box::new(like(search)));
@@ -826,6 +889,9 @@ fn post_clauses(filter: &PostFilter) -> Clauses {
     w.finish()
 }
 
+// The whole ladder in one place, one step per version: splitting it would
+// only scatter the schema.
+#[allow(clippy::too_many_lines)]
 fn step_sql(version: i64) -> &'static str {
     match version {
         1 => {
@@ -900,6 +966,81 @@ fn step_sql(version: i64) -> &'static str {
             );
             CREATE INDEX scheduled_due ON scheduled_posts(status, scheduled_at);"
         }
+        // Networks. A person or a post is keyed by (network, id), which SQLite
+        // cannot add to a table in place, so both are rebuilt with every row
+        // marked as X's — the only network there was. Posts gain the URL slug
+        // Meta's shortcodes need; jobs and the schedule gain a network.
+        2 => {
+            "CREATE TABLE users_v2 (
+                network TEXT NOT NULL DEFAULT 'x',
+                id TEXT NOT NULL,
+                handle TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                bio TEXT NOT NULL DEFAULT '',
+                location TEXT NOT NULL DEFAULT '',
+                website TEXT NOT NULL DEFAULT '',
+                followers INTEGER NOT NULL DEFAULT 0,
+                following INTEGER NOT NULL DEFAULT 0,
+                posts INTEGER NOT NULL DEFAULT 0,
+                verified INTEGER NOT NULL DEFAULT 0,
+                protected INTEGER NOT NULL DEFAULT 0,
+                avatar TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT '',
+                follows_me INTEGER,
+                followed_by_me INTEGER,
+                source TEXT NOT NULL DEFAULT '',
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                PRIMARY KEY (network, id)
+            );
+            INSERT INTO users_v2 (network, id, handle, name, bio, location, website, followers,
+                following, posts, verified, protected, avatar, created_at, follows_me,
+                followed_by_me, source, first_seen, last_seen)
+             SELECT 'x', id, handle, name, bio, location, website, followers, following, posts,
+                verified, protected, avatar, created_at, follows_me, followed_by_me, source,
+                first_seen, last_seen FROM users;
+            DROP TABLE users;
+            ALTER TABLE users_v2 RENAME TO users;
+            CREATE INDEX users_handle ON users(handle COLLATE NOCASE);
+            CREATE INDEX users_seen ON users(last_seen);
+            CREATE TABLE posts_v2 (
+                network TEXT NOT NULL DEFAULT 'x',
+                id TEXT NOT NULL,
+                slug TEXT NOT NULL DEFAULT '',
+                author_id TEXT NOT NULL DEFAULT '',
+                author_handle TEXT NOT NULL DEFAULT '',
+                text TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL DEFAULT 'post',
+                lang TEXT NOT NULL DEFAULT '',
+                likes INTEGER NOT NULL DEFAULT 0,
+                reposts INTEGER NOT NULL DEFAULT 0,
+                replies INTEGER NOT NULL DEFAULT 0,
+                views INTEGER NOT NULL DEFAULT 0,
+                bookmarked INTEGER NOT NULL DEFAULT 0,
+                media TEXT NOT NULL DEFAULT '[]',
+                repost_of TEXT NOT NULL DEFAULT '',
+                reply_to TEXT NOT NULL DEFAULT '',
+                quoted_id TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                PRIMARY KEY (network, id)
+            );
+            INSERT INTO posts_v2 (network, id, author_id, author_handle, text, created_at, kind,
+                lang, likes, reposts, replies, views, bookmarked, media, repost_of, reply_to,
+                quoted_id, source, first_seen, last_seen)
+             SELECT 'x', id, author_id, author_handle, text, created_at, kind, lang, likes,
+                reposts, replies, views, bookmarked, media, repost_of, reply_to, quoted_id,
+                source, first_seen, last_seen FROM posts;
+            DROP TABLE posts;
+            ALTER TABLE posts_v2 RENAME TO posts;
+            CREATE INDEX posts_author ON posts(author_handle COLLATE NOCASE);
+            CREATE INDEX posts_seen ON posts(last_seen);
+            CREATE INDEX posts_source ON posts(source);
+            ALTER TABLE jobs ADD COLUMN network TEXT NOT NULL DEFAULT 'x';
+            ALTER TABLE scheduled_posts ADD COLUMN network TEXT NOT NULL DEFAULT 'x';"
+        }
         _ => unreachable!("no schema step {version}"),
     }
 }
@@ -922,6 +1063,61 @@ mod tests {
             source: "Following".into(),
             ..User::default()
         }
+    }
+
+    #[test]
+    fn the_first_schema_migrates_with_every_row_kept_as_x() {
+        let conn = Connection::open_in_memory().expect("conn");
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO meta VALUES ('schema_version', '1');",
+        )
+        .expect("meta");
+        conn.execute_batch(step_sql(1)).expect("v1");
+        conn.execute_batch(
+            "INSERT INTO users (id, handle, first_seen, last_seen) VALUES ('1', 'alice', 't', 't');
+             INSERT INTO posts (id, author_handle, text, first_seen, last_seen)
+                VALUES ('10', 'alice', 'hi', 't', 't');
+             INSERT INTO jobs (kind, created_at) VALUES ('scan', 't');
+             INSERT INTO scheduled_posts (parts, scheduled_at, created_at)
+                VALUES ('[\"x\"]', '2030-01-01T00:00:00Z', 't');",
+        )
+        .expect("rows");
+        let db = Db::from_connection(conn).expect("migrates");
+        let users = db.users(&UserFilter::default()).expect("reads");
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].network, Network::X);
+        assert_eq!(users[0].handle, "alice");
+        let posts = db.posts(&PostFilter::default()).expect("reads");
+        assert_eq!(posts[0].network, Network::X);
+        assert_eq!(posts[0].slug, "");
+        assert_eq!(posts[0].url(), "https://x.com/alice/status/10");
+        assert_eq!(db.jobs(10).expect("jobs")[0].network, Network::X);
+        assert_eq!(
+            db.scheduled_posts().expect("schedule")[0].network,
+            Network::X
+        );
+        // The same id on another network is another row.
+        db.record_users(&[User {
+            network: Network::Threads,
+            id: "1".into(),
+            handle: "zuck".into(),
+            ..User::default()
+        }])
+        .expect("records");
+        assert_eq!(db.users(&UserFilter::default()).expect("reads").len(), 2);
+        let threads = db
+            .users(&UserFilter {
+                network: Some(Network::Threads),
+                ..UserFilter::default()
+            })
+            .expect("reads");
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].url(), "https://www.threads.com/@zuck");
+        let counts = db.counts(None).expect("counts");
+        assert_eq!(counts.users, 2);
+        assert_eq!(counts.networks.len(), 2);
+        assert_eq!(db.counts(Some(Network::Threads)).expect("counts").users, 1);
     }
 
     #[test]
@@ -1047,21 +1243,34 @@ mod tests {
             })
             .expect("reads");
         assert_eq!(by_author.len(), 1);
-        assert!(db.post("10").expect("reads").is_some());
-        assert!(db.post("11").expect("reads").is_none());
+        assert!(db.post(Network::X, "10").expect("reads").is_some());
+        assert!(db.post(Network::X, "11").expect("reads").is_none());
+        assert!(db.post(Network::Bluesky, "10").expect("reads").is_none());
 
-        let counts = db.counts().expect("counts");
+        let counts = db.counts(None).expect("counts");
         assert_eq!(counts.posts, 1);
-        assert_eq!(db.remove_posts(&["10".into()]).expect("removes"), 1);
+        assert_eq!(
+            db.remove_posts(Network::Bluesky, &["10".into()])
+                .expect("removes"),
+            0
+        );
+        assert_eq!(
+            db.remove_posts(Network::X, &["10".into()])
+                .expect("removes"),
+            1
+        );
         db.clear_captured().expect("clears");
-        assert_eq!(db.counts().expect("counts").posts, 0);
+        assert_eq!(db.counts(None).expect("counts").posts, 0);
     }
 
     #[test]
     fn jobs_are_queued_claimed_and_settled() {
         let db = Db::open_in_memory().expect("db");
-        let job = db.create_job("scan", "{}", true, "mcp").expect("creates");
+        let job = db
+            .create_job(Network::Bluesky, "scan", "{}", true, "mcp")
+            .expect("creates");
         assert_eq!(job.status, "queued");
+        assert_eq!(job.network, Network::Bluesky);
         let next = db.next_queued_job().expect("reads").expect("one");
         assert_eq!(next.id, job.id);
         let running = Job {
@@ -1082,9 +1291,14 @@ mod tests {
     fn scheduled_posts_are_claimed_once_and_missed_when_stale() {
         let db = Db::open_in_memory().expect("db");
         let post = db
-            .schedule_post(&["one".into(), "two".into()], "2026-01-01T09:00:00Z")
+            .schedule_post(
+                Network::X,
+                &["one".into(), "two".into()],
+                "2026-01-01T09:00:00Z",
+            )
             .expect("schedules");
         assert_eq!(post.parts.len(), 2);
+        assert_eq!(post.network, Network::X);
         assert!(
             db.claim_due_post("2026-01-01T08:00:00Z")
                 .expect("claims")
@@ -1102,7 +1316,7 @@ mod tests {
         );
         db.settle_post(claimed.id, "posted", "").expect("settles");
         let later = db
-            .schedule_post(&["late".into()], "2026-01-01T10:00:00Z")
+            .schedule_post(Network::Bluesky, &["late".into()], "2026-01-01T10:00:00Z")
             .expect("schedules");
         assert_eq!(db.mark_missed("2026-01-01T11:00:00Z").expect("marks"), 1);
         assert_eq!(

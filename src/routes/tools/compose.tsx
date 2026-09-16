@@ -6,17 +6,21 @@ import { ErrorLine, Field, Panel, Section, useRun } from '@/components/tools/pan
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
 import { partCost, usd } from '@/lib/api-costs'
+import { COMPOSING_NETWORKS, NETWORKS } from '@/lib/networks'
 import {
+  useActiveNetwork,
   useDeleteScheduledPost,
+  useHandle,
   useOps,
   usePostNow,
   usePreparePost,
   useSchedulePost,
   useScheduledPosts,
-  useSiteState,
 } from '@/lib/query'
-import type { ScheduledPost } from '@/lib/tauri/types'
+import type { Network, ScheduledPost } from '@/lib/tauri/types'
 import { cn } from '@/lib/utils'
+
+import { NetworkPicker } from './network-picker'
 
 export const Route = createFileRoute('/tools/compose')({ component: ComposeScreen })
 
@@ -47,12 +51,20 @@ const STATUS_STYLE: Record<ScheduledPost['status'], string> = {
 }
 
 /**
- * Markdown in, a thread out. The preview is Rust's own rendering — the same split and the same
- * count the post will go out with — so what it shows is what X gets. Posting goes through X's own
- * composer in the front tab, typed in; scheduling waits for the app to be open at the time.
+ * Markdown in, a thread out, on X or Bluesky. The preview is Rust's own rendering — the same split
+ * and the same count the post will go out with, by the network's own rule — so what it shows is
+ * what the site gets. Posting goes through the site's own composer in a tab of that network, typed
+ * in; scheduling waits for the app to be open at the time. Meta's composers are not driven from
+ * here.
  */
 function ComposeScreen() {
-  const site = useSiteState()
+  const active = useActiveNetwork()
+  // Follows the front tab while it is somewhere Twister can post; otherwise
+  // the last choice, or X.
+  const [picked, setPicked] = React.useState<Network | null>(null)
+  const network = picked ?? (NETWORKS[active].composes ? active : 'x')
+  const info = NETWORKS[network]
+  const handle = useHandle(network)
   const ops = useOps()
   const postNow = usePostNow()
   const schedule = useSchedulePost()
@@ -78,13 +90,15 @@ function ComposeScreen() {
     }
   }, [markdown])
 
-  const prepared = usePreparePost(debounced)
+  const prepared = usePreparePost(network, debounced)
   const parts = prepared.data?.parts ?? []
-  const limit = prepared.data?.limit ?? 280
+  const limit = prepared.data?.limit ?? (network === 'bluesky' ? 300 : 280)
   const over = parts.some((part) => part.count > limit)
   const busy = Boolean(ops.data?.running)
-  const signedIn = Boolean(site.data?.handle)
+  const signedIn = Boolean(handle)
   const empty = parts.length === 0
+  // Bluesky posts one at a time through Twister; a thread there is refused.
+  const tooMany = network === 'bluesky' && parts.length > 1
   // What X's API would bill for this, part by part: a link changes the row.
   const apiCost = parts.reduce((sum, part) => sum + partCost(part.hasLink), 0)
   const linked = parts.filter((part) => part.hasLink).length
@@ -92,9 +106,11 @@ function ComposeScreen() {
   return (
     <Panel
       title="Write"
-      note="Markdown that survives X: **bold** and *italic* become styled letters, `code` monospace, lists bullets, links plain. A line with --- breaks the thread; anything over 280 is split at a sentence."
+      note={`Markdown that survives the site: **bold** and *italic* become styled letters, \`code\` monospace, lists bullets, links plain. A line with --- breaks the thread; anything over ${limit} is split at a sentence. X counts URLs as 23 and wide characters as two; Bluesky counts every character once.`}
     >
       <ErrorLine message={error} />
+
+      <NetworkPicker value={network} onChange={setPicked} networks={COMPOSING_NETWORKS} />
 
       <Section title="Draft">
         <Textarea
@@ -138,7 +154,7 @@ function ComposeScreen() {
           Styled letters are Unicode look-alikes: they read as bold on X and as gibberish to a
           screen reader. Use them sparingly.
         </p>
-        {empty ? null : (
+        {empty || network !== 'x' ? null : (
           <p className="text-[11px] leading-relaxed text-muted-foreground tabular-nums">
             Through X’s API this would cost {usd(apiCost)}
             {linked > 0
@@ -147,16 +163,22 @@ function ComposeScreen() {
             . Through X’s composer, nothing.
           </p>
         )}
+        {tooMany ? (
+          <p className="text-[11px] leading-relaxed text-destructive">
+            Twister posts one post at a time on Bluesky; shorten this to a single post or post the
+            thread from Bluesky’s own composer.
+          </p>
+        ) : null}
       </Section>
 
       <Section title="Send">
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
-            disabled={busy || empty || over || !signedIn}
+            disabled={busy || empty || over || tooMany || !signedIn}
             onClick={() => {
               void run(async () => {
-                await postNow.mutateAsync(markdown)
+                await postNow.mutateAsync({ network, markdown })
                 setMarkdown('')
               })
             }}
@@ -165,7 +187,9 @@ function ComposeScreen() {
             Post now
           </Button>
           <span className="text-[11px] text-muted-foreground">
-            {signedIn ? 'Types it into X’s composer in the front tab.' : 'Sign in to X first.'}
+            {signedIn
+              ? `Types it into ${info.name}’s composer in a ${info.name} tab.`
+              : `Sign in to ${info.name} first.`}
           </span>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -182,12 +206,12 @@ function ComposeScreen() {
           <Button
             size="sm"
             variant="outline"
-            disabled={empty || over || !when}
+            disabled={empty || over || tooMany || !when}
             onClick={() => {
               void run(async () => {
                 const date = new Date(when)
                 if (Number.isNaN(date.getTime())) throw new Error('That is not a time.')
-                await schedule.mutateAsync({ markdown, scheduledAt: date.toISOString() })
+                await schedule.mutateAsync({ network, markdown, scheduledAt: date.toISOString() })
                 setMarkdown('')
               })
             }}
@@ -197,8 +221,9 @@ function ComposeScreen() {
           </Button>
         </div>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          A scheduled post goes out only while Twister is open and signed in. More than 15 minutes
-          late — the machine was asleep — and it is marked missed rather than sent late.
+          A scheduled post goes out only while Twister is open and signed in to its network. More
+          than 15 minutes late — the machine was asleep — and it is marked missed rather than sent
+          late.
         </p>
       </Section>
 
@@ -216,6 +241,7 @@ function ComposeScreen() {
                     <span className={cn('font-medium', STATUS_STYLE[post.status])}>
                       {post.status}
                     </span>
+                    <span className="text-muted-foreground">{NETWORKS[post.network].name}</span>
                     <span className="text-muted-foreground">
                       {new Date(post.scheduledAt).toLocaleString()}
                     </span>

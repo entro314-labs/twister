@@ -16,17 +16,20 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
+import { NETWORKS } from '@/lib/networks'
 import {
   useActiveTab,
   useExportPeople,
+  useHandle,
   useOps,
   usePeople,
-  useSiteState,
   useStartOp,
   useStoreCounts,
 } from '@/lib/query'
 import type { Person, PersonFilter } from '@/lib/tauri/types'
 import { cn } from '@/lib/utils'
+
+import { NetworkPicker, useNetworkPick } from './network-picker'
 
 export const Route = createFileRoute('/tools/people')({ component: PeopleScreen })
 
@@ -40,15 +43,17 @@ const RELATION: Record<Relation, Pick<PersonFilter, 'followsMe' | 'followedByMe'
 }
 
 /**
- * People the capture hook has seen, with the filters that answer the usual questions — who does not
- * follow back, who is worth following from a list — and the two operations on them. Scanning a page
- * is how the store fills: open your Following, someone's Followers or a list's members in a tab and
- * press Scan.
+ * People the capture hook has seen, on one network at a time, with the filters that answer the
+ * usual questions — who does not follow back, who is worth following from a list — and the two
+ * operations on them where the network allows them. Scanning a page is how the store fills: open
+ * your Following, someone's Followers or a list's members in a tab and press Scan.
  */
 function PeopleScreen() {
-  const site = useSiteState()
   const tab = useActiveTab()
-  const counts = useStoreCounts()
+  const [network, pickNetwork] = useNetworkPick()
+  const info = NETWORKS[network]
+  const handle = useHandle(network)
+  const counts = useStoreCounts(network)
   const ops = useOps()
   const start = useStartOp()
   const exportPeople = useExportPeople()
@@ -66,6 +71,7 @@ function PeopleScreen() {
 
   const filter = React.useMemo<PersonFilter>(
     () => ({
+      network,
       search,
       source: source || undefined,
       ...RELATION[relation],
@@ -74,22 +80,23 @@ function PeopleScreen() {
       sort,
       limit: 500,
     }),
-    [search, source, relation, minFollowers, maxFollowers, sort],
+    [network, search, source, relation, minFollowers, maxFollowers, sort],
   )
   const people = usePeople(filter)
   const rows = people.data ?? []
   const busy = Boolean(ops.data?.running)
   const currentPath = pathOf(tab?.url)
-  const handle = site.data?.handle ?? null
+  const onThisNetwork = tab?.network === network
+  const canAct = info.ops.includes('follow')
 
-  // The page the follow tools work on: whatever list is open, else the
-  // signed-in account's own Following.
+  // The page the follow tools work on: whatever list is open on this
+  // network, else the signed-in account's own Following.
   const listPage =
     page ||
-    (/\/(?:following|followers|members|verified_followers)/.test(currentPath)
+    (onThisNetwork && info.isListPage(currentPath)
       ? currentPath
       : handle
-        ? `/${handle}/following`
+        ? info.followingPage(handle)
         : '')
 
   const chosen = rows.filter((p) => selected.has(p.id))
@@ -98,6 +105,7 @@ function PeopleScreen() {
   const act = (kind: 'follow' | 'unfollow') => {
     void run(async () =>
       start.mutateAsync({
+        network,
         kind,
         params: { handles: chosen.map((p) => p.handle), page: listPage },
         dryRun,
@@ -108,18 +116,26 @@ function PeopleScreen() {
   return (
     <Panel
       title="People"
-      note="Everyone X has loaded into a tab while Twister watched: followers, following, list members, search results. Open a list in a tab and scan it to read all of it."
+      note="Everyone a site has loaded into a tab while Twister watched: followers, following, list members, search results. Open a list in a tab and scan it to read all of it."
     >
       <ErrorLine message={error} />
+
+      <NetworkPicker value={network} onChange={pickNetwork} />
 
       <Section title="Fill the store">
         <div className="flex items-center gap-2">
           <Button
             size="sm"
-            disabled={busy || !currentPath}
+            disabled={busy || !currentPath || !tab}
             onClick={() => {
+              if (!tab) return
               void run(async () =>
-                start.mutateAsync({ kind: 'scan', params: { page: currentPath }, dryRun: false }),
+                start.mutateAsync({
+                  network: tab.network,
+                  kind: 'scan',
+                  params: { page: currentPath },
+                  dryRun: false,
+                }),
               )
             }}
           >
@@ -127,12 +143,14 @@ function PeopleScreen() {
             Scan this page
           </Button>
           <span className="truncate font-mono text-[11px] text-muted-foreground">
-            {currentPath || 'no tab'}
+            {tab ? `${NETWORKS[tab.network].name} ${currentPath}` : 'no tab'}
           </span>
         </div>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           Scrolls the front tab to the end so everything on it is captured.{' '}
-          {counts.data ? `${compact(counts.data.users)} people in the store.` : ''}
+          {counts.data
+            ? `${compact(counts.data.users)} people from ${info.name} in the store.`
+            : ''}
         </p>
       </Section>
 
@@ -254,43 +272,56 @@ function PeopleScreen() {
       </Section>
 
       <Section title="Act on the selection">
-        <Field label="On the list page">
-          <Input
-            placeholder={listPage || '/handle/following'}
-            value={page}
-            onChange={(event) => {
-              setPage(event.target.value.trim())
-            }}
-          />
-        </Field>
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
-          Twister opens that page in the front tab and works through its cells, one every few
-          seconds, stopping at the first thing X refuses. People not on the page are reported, not
-          guessed at. Follow runs cap at 50, unfollow at 100.
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <DryRunToggle dryRun={dryRun} onChange={setDryRun} />
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy || chosen.length === 0 || !listPage}
-            onClick={() => {
-              act('follow')
-            }}
-          >
-            Follow {chosen.length || ''}
-          </Button>
-          <Button
-            size="sm"
-            variant={dryRun ? 'outline' : 'destructive'}
-            disabled={busy || chosen.length === 0 || !listPage}
-            onClick={() => {
-              act('unfollow')
-            }}
-          >
-            Unfollow {chosen.length || ''}
-          </Button>
-        </div>
+        {canAct ? (
+          <>
+            <Field label="On the list page">
+              <Input
+                placeholder={listPage || info.followingPage('handle')}
+                value={page}
+                onChange={(event) => {
+                  setPage(event.target.value.trim())
+                }}
+              />
+            </Field>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Twister opens that page in a {info.name} tab and works through its cells, one every
+              few seconds, stopping at the first thing the site refuses. People not on the page are
+              reported, not guessed at.{' '}
+              {network === 'x'
+                ? 'Follow runs cap at 50, unfollow at 100.'
+                : 'Follow runs cap at 30, unfollow at 60; the follow buttons on Bluesky’s lists have not been exercised live yet, so keep the first run a dry run.'}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <DryRunToggle dryRun={dryRun} onChange={setDryRun} />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || chosen.length === 0 || !listPage}
+                onClick={() => {
+                  act('follow')
+                }}
+              >
+                Follow {chosen.length || ''}
+              </Button>
+              <Button
+                size="sm"
+                variant={dryRun ? 'outline' : 'destructive'}
+                disabled={busy || chosen.length === 0 || !listPage}
+                onClick={() => {
+                  act('unfollow')
+                }}
+              >
+                Unfollow {chosen.length || ''}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Twister only watches {info.name}: it records and exports what the page loads and never
+            follows or unfollows there. Meta treats a clicked-for-you follow as a reason to lock an
+            account. Use {info.name}’s own buttons.
+          </p>
+        )}
       </Section>
     </Panel>
   )

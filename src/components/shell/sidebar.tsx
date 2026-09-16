@@ -28,9 +28,16 @@ import {
   TITLEBAR_INSET_LEFT_FULLSCREEN,
 } from '@/lib/chrome'
 import { useIsFullscreen } from '@/lib/fullscreen'
+import { NETWORKS, NETWORK_ORDER } from '@/lib/networks'
 import { usePrefs } from '@/lib/prefs'
-import { useActiveTab, useNavigateSite, useSiteState } from '@/lib/query'
-import type { Destination, Section } from '@/lib/tauri/types'
+import {
+  useActiveNetwork,
+  useActiveTab,
+  useHandle,
+  useNavigateSite,
+  useSwitchNetwork,
+} from '@/lib/query'
+import type { Destination, Network, Section } from '@/lib/tauri/types'
 import { useTip, withHandlers } from '@/lib/tooltip'
 import { cn } from '@/lib/utils'
 
@@ -43,7 +50,8 @@ interface NavItem {
 }
 
 // The same six destinations the View menu carries, in the same order, with
-// the same shortcuts — the sidebar is the menu you can see.
+// the same shortcuts — the sidebar is the menu you can see. Each network
+// shows the ones its site has a page for.
 const NAV: NavItem[] = [
   { destination: 'home', section: 'home', label: 'Home', shortcut: '1', icon: IconHome },
   {
@@ -161,10 +169,10 @@ function FullContent() {
         <LayoutButton />
       </header>
 
+      <NetworkSwitcher />
+
       <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-1">
-        {NAV.map((item) => (
-          <NavRow key={item.destination} item={item} />
-        ))}
+        <NavRows />
         <Divider />
         {TOOLS.map((item) => (
           <ToolRow key={item.to} item={item} />
@@ -196,10 +204,9 @@ function RailContent() {
           <LayoutButton rail />
         </div>
       ) : null}
+      <NetworkSwitcher rail />
       <nav className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto py-1">
-        {NAV.map((item) => (
-          <NavRow key={item.destination} item={item} rail />
-        ))}
+        <NavRows rail />
         <Divider rail />
         {TOOLS.map((item) => (
           <ToolRow key={item.to} item={item} rail />
@@ -224,6 +231,87 @@ const rowClass = (active: boolean, rail: boolean, disabled = false) =>
 
 function Divider({ rail = false }: { rail?: boolean }) {
   return <div aria-hidden className={cn('my-1.5 h-px bg-border/60', rail ? 'w-5' : 'mx-2.5')} />
+}
+
+/**
+ * The networks, one glyph each, in the order the Network menu lists them. The front tab's network
+ * is the lit one; picking another brings its last-used tab forward, or opens one on its home.
+ */
+function NetworkSwitcher({ rail = false }: { rail?: boolean }) {
+  const active = useActiveNetwork()
+  return (
+    <div
+      role="group"
+      aria-label="Networks"
+      className={cn(
+        'flex shrink-0 items-center',
+        rail ? 'flex-col gap-1 pb-1' : 'gap-1 px-2.5 pb-1.5',
+      )}
+    >
+      {NETWORK_ORDER.map((network, index) => (
+        <NetworkButton
+          key={network}
+          network={network}
+          shortcut={`${MOD_KEY}⇧${index + 1}`}
+          active={network === active}
+          rail={rail}
+        />
+      ))}
+    </div>
+  )
+}
+
+function NetworkButton({
+  network,
+  shortcut,
+  active,
+  rail,
+}: {
+  network: Network
+  shortcut: string
+  active: boolean
+  rail: boolean
+}) {
+  const info = NETWORKS[network]
+  const Icon = info.icon
+  const switchTo = useSwitchNetwork()
+  const navigate = useNavigate()
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const tip = useTip(info.name, shortcut, rail ? 'right' : 'bottom')
+  return (
+    <button
+      type="button"
+      aria-label={info.name}
+      aria-pressed={active}
+      {...tip}
+      onClick={() => {
+        switchTo.mutate(network)
+        if (pathname !== '/' && !pathname.startsWith('/tools')) void navigate({ to: '/' })
+      }}
+      className={cn(
+        'grid place-items-center rounded-md transition-colors duration-[var(--motion-micro)]',
+        rail ? 'size-9' : 'h-8 flex-1',
+        active
+          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+          : 'text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground',
+      )}
+    >
+      <Icon size={ICON_SIZE} stroke={1.75} />
+    </button>
+  )
+}
+
+/** The destinations the front tab's site has a page for. */
+function NavRows({ rail = false }: { rail?: boolean }) {
+  const network = useActiveNetwork()
+  const available = NETWORKS[network].destinations
+  return (
+    <>
+      {NAV.filter((item) => available.includes(item.destination)).map((item) => (
+        <NavRow key={item.destination} item={item} rail={rail} />
+      ))}
+    </>
+  )
 }
 
 /** A tool panel, beside the island. Clicking the open one closes it. */
@@ -266,21 +354,21 @@ function ActiveMarker({ active }: { active: boolean }) {
 }
 
 /**
- * One destination on X. A row is a button rather than a link because it moves the SITE, not this
- * page — and if this page is on Settings, it moves back to the island as well.
+ * One destination on the front tab's site. A row is a button rather than a link because it moves
+ * the SITE, not this page — and if this page is on Settings, it moves back to the island as well.
  */
 function NavRow({ item, rail = false }: { item: NavItem; rail?: boolean }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const navigate = useNavigate()
-  const site = useSiteState()
   const tab = useActiveTab()
+  const handle = useHandle(useActiveNetwork())
   const go = useNavigateSite()
 
   const onIsland = pathname === '/' || pathname.startsWith('/tools')
   const active = onIsland && tab?.section === item.section
-  // Profile needs the handle, which the bridge only learns once X has drawn
-  // its own navigation — a row that cannot go anywhere yet says so.
-  const disabled = item.destination === 'profile' && !site.data?.handle
+  // Profile needs the handle, which the bridge only learns once the site has
+  // drawn its own navigation — a row that cannot go anywhere yet says so.
+  const disabled = item.destination === 'profile' && !handle
   const unread = item.section === 'notifications' ? (tab?.unread ?? 0) : 0
   const Icon = item.icon
   const tip = useTip(item.label, `${MOD_KEY}${item.shortcut}`)
@@ -307,8 +395,8 @@ function NavRow({ item, rail = false }: { item: NavItem; rail?: boolean }) {
       {rail ? null : (
         <>
           <span className="truncate">{item.label}</span>
-          {item.destination === 'profile' && site.data?.handle ? (
-            <span className="truncate text-xs text-muted-foreground/80">@{site.data.handle}</span>
+          {item.destination === 'profile' && handle ? (
+            <span className="truncate text-xs text-muted-foreground/80">@{handle}</span>
           ) : null}
           {unread > 0 ? (
             <span className="ml-auto rounded-4xl bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground tabular-nums">

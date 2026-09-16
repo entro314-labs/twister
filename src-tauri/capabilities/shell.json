@@ -19,6 +19,7 @@
     "allow-update-settings",
     "allow-get-site-state",
     "allow-navigate-site",
+    "allow-switch-network",
     "allow-site-action",
     "allow-set-site-insets",
     "allow-set-site-visible",

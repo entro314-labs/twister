@@ -2,14 +2,17 @@
 //! scrolling a list to the end, following or unfollowing a set of people,
 //! deleting posts, publishing a thread.
 //!
-//! Each one runs inside x.com, in `site/ops.js`, because that is where the
-//! buttons are. Rust is the ledger and the guard: it starts exactly one at a
-//! time, gets the site to the right page first, records progress as the page
-//! reports it, and writes the outcome to the store. A page that reloads
-//! mid-run takes the running script with it, so a reload fails the job
-//! rather than leaving it "running" forever.
+//! Each one runs inside the site, in that network's `ops.js`, because that
+//! is where the buttons are. Rust is the ledger and the guard: it starts
+//! exactly one at a time, brings a tab of the job's network to the front,
+//! gets it to the right page, records progress as the page reports it, and
+//! writes the outcome to the store. A page that reloads mid-run takes the
+//! running script with it, so a reload fails the job rather than leaving it
+//! "running" forever.
 //!
-//! Everything destructive defaults to a dry run, in `ops.js` and here.
+//! Everything destructive defaults to a dry run, in the scripts and here.
+//! A network that Twister only watches (see `Network::supports`) refuses
+//! everything but a scan before a job is even written down.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -18,10 +21,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, EventTarget, Manager};
 
-use crate::capture::valid_id;
 use crate::db::{self, Job};
 use crate::error::{AppError, Result};
-use crate::site::{self, SHELL_LABEL, valid_handle};
+use crate::network::Network;
+use crate::site::{self, SHELL_LABEL};
 
 /// The running job, whenever it changes. Payload: [`Job`].
 pub const EVENT_OP: &str = "twister://op";
@@ -78,11 +81,14 @@ fn store(app: &AppHandle) -> tauri::State<'_, db::Db> {
 
 /// Checks a job's parameters before anything runs, and returns the page the
 /// site has to be on for it, if any.
-pub fn validate(kind: &str, params: &Value) -> Result<Option<String>> {
+pub fn validate(network: Network, kind: &str, params: &Value) -> Result<Option<String>> {
     if !KINDS.contains(&kind) {
         return Err(AppError::InvalidInput(format!(
             "Unknown operation `{kind}`."
         )));
+    }
+    if !network.supports(kind) {
+        return Err(AppError::InvalidInput(network.refusal(kind)));
     }
     let object = params
         .as_object()
@@ -94,7 +100,10 @@ pub fn validate(kind: &str, params: &Value) -> Result<Option<String>> {
     if let Some(page) = &page
         && (!page.starts_with('/') || page.len() > 200 || page.contains("//"))
     {
-        return Err(AppError::InvalidInput("The page must be an X path.".into()));
+        return Err(AppError::InvalidInput(format!(
+            "The page must be a path on {}.",
+            network.name()
+        )));
     }
     let strings = |key: &str, max: usize| -> Result<Vec<String>> {
         let list = object
@@ -117,7 +126,7 @@ pub fn validate(kind: &str, params: &Value) -> Result<Option<String>> {
     match kind {
         "follow" | "unfollow" => {
             let handles = strings("handles", MAX_HANDLES)?;
-            if handles.is_empty() || !handles.iter().all(|h| valid_handle(h)) {
+            if handles.is_empty() || !handles.iter().all(|h| network.valid_handle(h)) {
                 return Err(AppError::InvalidInput(
                     "Give at least one handle, and only handles.".into(),
                 ));
@@ -130,7 +139,7 @@ pub fn validate(kind: &str, params: &Value) -> Result<Option<String>> {
         }
         "delete" => {
             let ids = strings("ids", MAX_IDS)?;
-            if ids.is_empty() || !ids.iter().all(|id| valid_id(id)) {
+            if ids.is_empty() || !ids.iter().all(|id| network.valid_id(id)) {
                 return Err(AppError::InvalidInput(
                     "Give at least one post id, and only ids.".into(),
                 ));
@@ -173,21 +182,22 @@ pub fn state(app: &AppHandle) -> Result<OpsState> {
 /// page is how accounts get flagged.
 pub fn start(
     app: &AppHandle,
+    network: Network,
     kind: &str,
     params: Value,
     dry_run: bool,
     origin: &str,
     scheduled_post: Option<i64>,
 ) -> Result<Job> {
-    let page = validate(kind, &params)?;
-    let job = store(app).create_job(kind, &params.to_string(), dry_run, origin)?;
+    let page = validate(network, kind, &params)?;
+    let job = store(app).create_job(network, kind, &params.to_string(), dry_run, origin)?;
     launch(app, job, page, scheduled_post)
 }
 
 /// Runs a job that already exists in the ledger — one the MCP binary queued.
 pub fn start_queued(app: &AppHandle, job: Job) -> Result<Job> {
     let params: Value = serde_json::from_str(&job.params).unwrap_or(Value::Null);
-    match validate(&job.kind, &params) {
+    match validate(job.network, &job.kind, &params) {
         Ok(page) => launch(app, job, page, None),
         Err(err) => {
             let failed = Job {
@@ -244,7 +254,9 @@ fn launch(
     let app = app.clone();
     let started = job.clone();
     std::thread::spawn(move || {
-        if let Err(err) = reach(&app, page.as_deref()).and_then(|()| run(&app, &started)) {
+        if let Err(err) =
+            reach(&app, started.network, page.as_deref()).and_then(|()| run(&app, &started))
+        {
             log::warn!("operation {} could not start: {err}", started.id);
             let _ = report(
                 &app,
@@ -260,10 +272,15 @@ fn launch(
     Ok(job)
 }
 
-/// Gets the site onto `page` and waits for the load to settle. X redirects
-/// some paths (`/i/bookmarks` lands on `/i/history`), so a page that settled
-/// somewhere else after the navigation counts as reached too.
-fn reach(app: &AppHandle, page: Option<&str>) -> Result<()> {
+/// Brings a tab of `network` to the front, gets it onto `page` and waits for
+/// the load to settle. X redirects some paths (`/i/bookmarks` lands on
+/// `/i/history`), so a page that settled somewhere else after the navigation
+/// counts as reached too.
+fn reach(app: &AppHandle, network: Network, page: Option<&str>) -> Result<()> {
+    if site::active_network(app) != Some(network) {
+        site::activate_network(app, network)?;
+        // A tab just opened is still loading; the wait below covers it.
+    }
     let Some(page) = page else {
         return Ok(());
     };
@@ -279,14 +296,15 @@ fn reach(app: &AppHandle, page: Option<&str>) -> Result<()> {
         return Ok(());
     }
     // In-app first: a full load of an X route sits on the splash screen for
-    // a long while, and X's router takes a pushState the way it takes Back.
+    // a long while, and every site's router takes a pushState the way it
+    // takes Back.
     let in_app = site::go_path(app, page).is_ok();
     let quick = Instant::now() + Duration::from_secs(3);
     while in_app && Instant::now() < quick && current_path() != wanted {
         std::thread::sleep(Duration::from_millis(100));
     }
     if current_path() != wanted {
-        site::navigate(app, &format!("https://x.com{page}"))?;
+        site::navigate(app, &format!("{}{page}", network.origin()))?;
     }
     let deadline = Instant::now() + NAVIGATION_TIMEOUT;
     let mut stable_since: Option<(String, Instant)> = None;
@@ -342,8 +360,8 @@ fn run(app: &AppHandle, job: &Job) -> Result<()> {
 
 /// A report from a page. Only the active tab may speak, and only about the
 /// running job; posts it says it deleted leave the store only for a live
-/// delete run — anything on x.com can call the command, so nothing in it is
-/// taken on trust.
+/// delete run — anything on the site can call the command, so nothing in it
+/// is taken on trust.
 pub fn report_from(
     app: &AppHandle,
     caller: &str,
@@ -359,15 +377,18 @@ pub fn report_from(
         .lock()
         .map_err(|_| AppError::Internal("Ops lock poisoned.".into()))?
         .as_ref()
-        .is_some_and(|r| r.job.id == id && r.job.kind == "delete" && !r.job.dry_run);
-    if live_delete && !removed.is_empty() {
+        .filter(|r| r.job.id == id && r.job.kind == "delete" && !r.job.dry_run)
+        .map(|r| r.job.network);
+    if let Some(network) = live_delete
+        && !removed.is_empty()
+    {
         let ids: Vec<String> = removed
             .iter()
-            .filter(|id| valid_id(id))
+            .filter(|id| network.valid_id(id))
             .take(500)
             .cloned()
             .collect();
-        store(app).remove_posts(&ids)?;
+        store(app).remove_posts(network, &ids)?;
     }
     report(app, id, progress)
 }
@@ -521,42 +542,88 @@ mod tests {
 
     #[test]
     fn kinds_and_parameters_are_checked() {
-        assert!(validate("scan", &json!({})).expect("ok").is_none());
+        let x = Network::X;
+        assert!(validate(x, "scan", &json!({})).expect("ok").is_none());
         assert_eq!(
-            validate("scan", &json!({ "page": "/i/bookmarks" })).expect("ok"),
+            validate(x, "scan", &json!({ "page": "/i/bookmarks" })).expect("ok"),
             Some("/i/bookmarks".into())
         );
-        assert!(validate("scan", &json!({ "page": "https://x.com/home" })).is_err());
-        assert!(validate("scan", &json!({ "page": "/a//b" })).is_err());
-        assert!(validate("scan", &json!([])).is_err());
-        assert!(validate("dance", &json!({})).is_err());
+        assert!(validate(x, "scan", &json!({ "page": "https://x.com/home" })).is_err());
+        assert!(validate(x, "scan", &json!({ "page": "/a//b" })).is_err());
+        assert!(validate(x, "scan", &json!([])).is_err());
+        assert!(validate(x, "dance", &json!({})).is_err());
 
         assert!(
             validate(
+                x,
                 "unfollow",
                 &json!({ "handles": ["a"], "page": "/me/following" })
             )
             .is_ok()
         );
-        assert!(validate("unfollow", &json!({ "handles": ["a"] })).is_err());
-        assert!(validate("unfollow", &json!({ "handles": [], "page": "/x" })).is_err());
+        assert!(validate(x, "unfollow", &json!({ "handles": ["a"] })).is_err());
+        assert!(validate(x, "unfollow", &json!({ "handles": [], "page": "/x" })).is_err());
         assert!(
             validate(
+                x,
                 "follow",
                 &json!({ "handles": ["not a handle"], "page": "/x" })
             )
             .is_err()
         );
-        assert!(validate("follow", &json!({ "handles": [1], "page": "/x" })).is_err());
+        assert!(validate(x, "follow", &json!({ "handles": [1], "page": "/x" })).is_err());
 
-        assert!(validate("delete", &json!({ "ids": ["1"], "page": "/me" })).is_ok());
-        assert!(validate("delete", &json!({ "ids": ["x"], "page": "/me" })).is_err());
+        assert!(validate(x, "delete", &json!({ "ids": ["1"], "page": "/me" })).is_ok());
+        assert!(validate(x, "delete", &json!({ "ids": ["x"], "page": "/me" })).is_err());
 
-        assert!(validate("compose", &json!({ "parts": ["hello"] })).is_ok());
-        assert!(validate("compose", &json!({ "parts": [""] })).is_err());
-        assert!(validate("compose", &json!({ "parts": [] })).is_err());
+        assert!(validate(x, "compose", &json!({ "parts": ["hello"] })).is_ok());
+        assert!(validate(x, "compose", &json!({ "parts": [""] })).is_err());
+        assert!(validate(x, "compose", &json!({ "parts": [] })).is_err());
         let long = "x".repeat(MAX_PART + 1);
-        assert!(validate("compose", &json!({ "parts": [long] })).is_err());
+        assert!(validate(x, "compose", &json!({ "parts": [long] })).is_err());
+    }
+
+    #[test]
+    fn each_network_has_its_own_handles_and_its_own_refusals() {
+        let bluesky = Network::Bluesky;
+        assert!(
+            validate(
+                bluesky,
+                "follow",
+                &json!({ "handles": ["a.bsky.social"], "page": "/profile/me/follows" })
+            )
+            .is_ok()
+        );
+        // An X handle is not a Bluesky handle.
+        assert!(
+            validate(
+                bluesky,
+                "follow",
+                &json!({ "handles": ["alice"], "page": "/profile/me/follows" })
+            )
+            .is_err()
+        );
+        assert!(
+            validate(
+                bluesky,
+                "delete",
+                &json!({ "ids": ["at://did:plc:a/app.bsky.feed.post/3k"], "page": "/profile/me" })
+            )
+            .is_ok()
+        );
+        // Meta's sites are watched, never driven.
+        for network in [Network::Threads, Network::Instagram] {
+            assert!(validate(network, "scan", &json!({ "page": "/@zuck" })).is_ok());
+            let refused = validate(
+                network,
+                "follow",
+                &json!({ "handles": ["zuck"], "page": "/@zuck/followers" }),
+            )
+            .expect_err("refused");
+            assert!(refused.to_string().contains("does not follow"));
+            assert!(validate(network, "compose", &json!({ "parts": ["hi"] })).is_err());
+            assert!(validate(network, "delete", &json!({ "ids": ["1"], "page": "/@me" })).is_err());
+        }
     }
 
     #[test]

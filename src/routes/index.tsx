@@ -1,7 +1,8 @@
-import { IconBrandX } from '@tabler/icons-react'
 import { createFileRoute } from '@tanstack/react-router'
 
 import { EmptyState } from '@/components/shell/empty-state'
+import { NETWORKS } from '@/lib/networks'
+import { useActiveNetwork } from '@/lib/query'
 
 export const Route = createFileRoute('/')({ component: IslandScreen })
 
@@ -11,11 +12,12 @@ export const Route = createFileRoute('/')({ component: IslandScreen })
  * than leaving a blank.
  */
 function IslandScreen() {
+  const network = NETWORKS[useActiveNetwork()]
   return (
     <EmptyState
-      icon={IconBrandX}
-      title="Opening X"
-      description="X loads in its own view over this one. If this message stays, the site view could not be created — quit and open Twister again."
+      icon={network.icon}
+      title={`Opening ${network.name}`}
+      description={`${network.name} loads in its own view over this one. If this message stays, the site view could not be created — quit and open Twister again.`}
       className="h-full"
     />
   )

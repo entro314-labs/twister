@@ -17,16 +17,19 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
+import { NETWORKS } from '@/lib/networks'
 import {
   useActiveTab,
   useExportPosts,
+  useHandle,
   useOps,
   usePosts,
-  useSiteState,
   useStartOp,
   useStoreCounts,
 } from '@/lib/query'
 import type { Post, PostFilter, PostKind } from '@/lib/tauri/types'
+
+import { NetworkPicker, useNetworkPick } from './network-picker'
 
 export const Route = createFileRoute('/tools/posts')({ component: PostsScreen })
 
@@ -38,14 +41,17 @@ const KIND_LABEL: Record<PostKind, string> = {
 }
 
 /**
- * Posts the capture hook has seen: a timeline, a profile, a list, bookmarks. Filter, export, and —
- * for your own — delete in bulk. Bookmarks export is this screen with "Seen in" set to Bookmarks
- * after a scan of the bookmarks page.
+ * Posts the capture hook has seen, on one network at a time: a timeline, a profile, a list,
+ * bookmarks. Filter, export, and — for your own, where the network allows it — delete in bulk.
+ * Bookmarks export is this screen with "Seen in" set to the bookmarks source after a scan of the
+ * bookmarks page.
  */
 function PostsScreen() {
-  const site = useSiteState()
   const tab = useActiveTab()
-  const counts = useStoreCounts()
+  const [network, pickNetwork] = useNetworkPick()
+  const info = NETWORKS[network]
+  const handle = useHandle(network)
+  const counts = useStoreCounts(network)
   const ops = useOps()
   const start = useStartOp()
   const exportPosts = useExportPosts()
@@ -62,6 +68,7 @@ function PostsScreen() {
 
   const filter = React.useMemo<PostFilter>(
     () => ({
+      network,
       search,
       source: source || undefined,
       kind: kind || undefined,
@@ -70,13 +77,13 @@ function PostsScreen() {
       sort,
       limit: 500,
     }),
-    [search, source, kind, author, media, sort],
+    [network, search, source, kind, author, media, sort],
   )
   const posts = usePosts(filter)
   const rows = posts.data ?? []
   const busy = Boolean(ops.data?.running)
   const currentPath = pathOf(tab?.url)
-  const handle = site.data?.handle ?? null
+  const canDelete = info.ops.includes('delete')
 
   const chosen = rows.filter((p) => selected.has(p.id))
   const allChosen = rows.length > 0 && chosen.length === rows.length
@@ -84,25 +91,33 @@ function PostsScreen() {
     Boolean(handle) &&
     chosen.length > 0 &&
     chosen.every((p) => p.authorHandle.toLowerCase() === handle?.toLowerCase())
-  const likesPage = /\/likes\/?$/.test(currentPath)
-  // Deleting happens on your profile, or on your Likes page for unliking.
-  const deletePage = likesPage && handle ? `/${handle}/likes` : handle ? `/${handle}` : ''
+  const likesPage = network === 'x' && tab?.network === 'x' && /\/likes\/?$/.test(currentPath)
+  // Deleting happens on your profile, or — on X — on your Likes page for unliking.
+  const deletePage = !handle ? '' : likesPage ? `/${handle}/likes` : info.profilePage(handle)
 
   return (
     <Panel
       title="Posts"
-      note="Every post X has loaded into a tab while Twister watched, with what X said about it. Open your bookmarks, a profile or a list in a tab and scan it to read all of it."
+      note="Every post a site has loaded into a tab while Twister watched, with what the site said about it. Open your bookmarks, a profile or a list in a tab and scan it to read all of it."
     >
       <ErrorLine message={error} />
+
+      <NetworkPicker value={network} onChange={pickNetwork} />
 
       <Section title="Fill the store">
         <div className="flex items-center gap-2">
           <Button
             size="sm"
-            disabled={busy || !currentPath}
+            disabled={busy || !currentPath || !tab}
             onClick={() => {
+              if (!tab) return
               void run(async () =>
-                start.mutateAsync({ kind: 'scan', params: { page: currentPath }, dryRun: false }),
+                start.mutateAsync({
+                  network: tab.network,
+                  kind: 'scan',
+                  params: { page: currentPath },
+                  dryRun: false,
+                }),
               )
             }}
           >
@@ -110,12 +125,14 @@ function PostsScreen() {
             Scan this page
           </Button>
           <span className="truncate font-mono text-[11px] text-muted-foreground">
-            {currentPath || 'no tab'}
+            {tab ? `${NETWORKS[tab.network].name} ${currentPath}` : 'no tab'}
           </span>
         </div>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          {counts.data ? `${compact(counts.data.posts)} posts in the store. ` : ''}
-          For bookmarks, open Bookmarks (⌘5), scan, then pick Bookmarks below.
+          {counts.data
+            ? `${compact(counts.data.posts)} posts from ${info.name} in the store. `
+            : ''}
+          For bookmarks, open Bookmarks (⌘5), scan, then pick the bookmarks source below.
         </p>
       </Section>
 
@@ -239,33 +256,50 @@ function PostsScreen() {
       </Section>
 
       <Section title="Delete the selection">
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
-          Only your own posts, from your profile page: Twister opens it in the front tab, finds each
-          selected post as it scrolls, and deletes it through X’s own menu — reposts are undone, and
-          on your Likes page the selection is unliked instead. One every few seconds; stops at the
-          first thing X refuses.
-          {handle ? '' : ' Twister has not seen your handle yet.'}
-          {chosen.length > 0 && !allMine ? ' The selection includes posts that are not yours.' : ''}
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <DryRunToggle dryRun={dryRun} onChange={setDryRun} />
-          <Button
-            size="sm"
-            variant={dryRun ? 'outline' : 'destructive'}
-            disabled={busy || !allMine || !deletePage}
-            onClick={() => {
-              void run(async () =>
-                start.mutateAsync({
-                  kind: 'delete',
-                  params: { ids: chosen.map((p) => p.id), page: deletePage },
-                  dryRun,
-                }),
-              )
-            }}
-          >
-            {likesPage ? 'Unlike' : 'Delete'} {chosen.length || ''}
-          </Button>
-        </div>
+        {canDelete ? (
+          <>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Only your own posts, from your profile page: Twister opens it in a {info.name} tab,
+              finds each selected post as it scrolls, and deletes it through the site’s own menu
+              {network === 'x'
+                ? ' — reposts are undone, and on your Likes page the selection is unliked instead'
+                : ''}
+              . One every few seconds; stops at the first thing the site refuses.
+              {network === 'bluesky'
+                ? ' Bluesky’s delete menu has not been exercised live yet; keep the first run a dry run.'
+                : ''}
+              {handle ? '' : ' Twister has not seen your handle yet.'}
+              {chosen.length > 0 && !allMine
+                ? ' The selection includes posts that are not yours.'
+                : ''}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <DryRunToggle dryRun={dryRun} onChange={setDryRun} />
+              <Button
+                size="sm"
+                variant={dryRun ? 'outline' : 'destructive'}
+                disabled={busy || !allMine || !deletePage}
+                onClick={() => {
+                  void run(async () =>
+                    start.mutateAsync({
+                      network,
+                      kind: 'delete',
+                      params: { ids: chosen.map((p) => p.id), page: deletePage },
+                      dryRun,
+                    }),
+                  )
+                }}
+              >
+                {likesPage ? 'Unlike' : 'Delete'} {chosen.length || ''}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Twister only watches {info.name}: it records and exports what the page loads and never
+            deletes there. Use {info.name}’s own menu.
+          </p>
+        )}
       </Section>
     </Panel>
   )

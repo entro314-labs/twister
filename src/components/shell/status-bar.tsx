@@ -1,5 +1,6 @@
 import * as React from 'react'
 
+import { NETWORKS } from '@/lib/networks'
 import {
   useActiveTab,
   useCancelOp,
@@ -12,7 +13,8 @@ import { IPC_EVENTS } from '@/lib/tauri/ipc'
 import type { Notice, OpKind, Section } from '@/lib/tauri/types'
 import { cn } from '@/lib/utils'
 
-const SECTION_LABEL: Record<Section, string> = {
+/** The section's name; anywhere else on the site, the network's. */
+const SECTION_LABEL: Record<Exclude<Section, 'other'>, string> = {
   home: 'Home',
   explore: 'Explore',
   notifications: 'Notifications',
@@ -20,7 +22,6 @@ const SECTION_LABEL: Record<Section, string> = {
   bookmarks: 'Bookmarks',
   profile: 'Profile',
   compose: 'New post',
-  other: 'X',
 }
 
 const OP_LABEL: Record<OpKind, string> = {
@@ -32,9 +33,10 @@ const OP_LABEL: Record<OpKind, string> = {
 }
 
 /**
- * The island's footer: where on X the front tab is, whether it is still loading, the operation
- * running in it, and the one-line notices Rust sends — "opened example.com in your browser" is the
- * whole difference between a link that went somewhere and one that silently did nothing.
+ * The island's footer: where on its site the front tab is, whether it is still loading, the
+ * operation running in it, and the one-line notices Rust sends — "opened example.com in your
+ * browser" is the whole difference between a link that went somewhere and one that silently did
+ * nothing.
  */
 export function StatusBar() {
   const tab = useActiveTab()
@@ -46,6 +48,12 @@ export function StatusBar() {
 
   const path = pathOf(tab?.url)
   const running = ops.data?.running ?? null
+  const network = tab ? NETWORKS[tab.network] : null
+  const place = !tab
+    ? ''
+    : tab.section === 'other'
+      ? network?.name
+      : `${network?.name} · ${SECTION_LABEL[tab.section]}`
 
   return (
     <footer className="flex h-6 shrink-0 items-center gap-3 border-t border-border/50 px-3 text-[11px] text-muted-foreground">
@@ -57,7 +65,7 @@ export function StatusBar() {
             tab?.loading ? 'animate-[var(--animate-carrier)] bg-primary' : 'bg-success',
           )}
         />
-        <span className="shrink-0">{SECTION_LABEL[tab?.section ?? 'other']}</span>
+        <span className="shrink-0">{place}</span>
         {path ? <span className="truncate font-mono text-muted-foreground/70">{path}</span> : null}
       </span>
 
@@ -88,7 +96,7 @@ export function StatusBar() {
         <span className="flex min-w-0 items-center gap-2 text-foreground/80">
           <span className="size-1.5 shrink-0 animate-[var(--animate-carrier)] rounded-full bg-warning" />
           <span className="truncate">
-            {OP_LABEL[running.kind]}
+            {OP_LABEL[running.kind]} on {NETWORKS[running.network].name}
             {running.dryRun ? ' (dry run)' : ''}
             {running.total > 0 ? ` ${running.done}/${running.total}` : ''}
             {running.message ? ` · ${running.message}` : ''}

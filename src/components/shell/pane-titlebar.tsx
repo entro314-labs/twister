@@ -7,21 +7,29 @@ import { WindowControls } from '@/components/shell/window-controls'
 import { Button } from '@/components/ui/button'
 import { useAnimatedIcon } from '@/lib/animated-icon'
 import { MOD_KEY, TITLEBAR_H } from '@/lib/chrome'
-import { useNavigateSite, useSiteAction } from '@/lib/query'
+import { NETWORKS } from '@/lib/networks'
+import { useActiveNetwork, useNavigateSite, useSiteAction } from '@/lib/query'
 import type { SiteAction } from '@/lib/tauri/types'
 import { useTip, withHandlers } from '@/lib/tooltip'
 
 /**
- * The island's own chrome, in one band: the browser verbs X has no buttons for, the open tabs —
- * each one carrying its page's title, so the band needs no title of its own — the one action people
- * reach for most, and the window controls. The whole band is a drag region. The island owning its
- * chrome — rather than a shared band across the top of the window — is what makes the content
- * column read as one object instead of a slab between two strips.
+ * The island's own chrome, in one band: the browser verbs the sites have no buttons for, the open
+ * tabs — each one carrying its page's title, so the band needs no title of its own — the one action
+ * people reach for most, and the window controls. The whole band is a drag region. The island
+ * owning its chrome — rather than a shared band across the top of the window — is what makes the
+ * content column read as one object instead of a slab between two strips.
  */
 export function PaneTitlebar() {
   const go = useNavigateSite()
+  const network = NETWORKS[useActiveNetwork()]
+  // Meta's composers are modals Twister cannot open by URL; the button says so.
+  const canCompose = network.destinations.includes('compose')
   const [composeRef, composeHover] = useAnimatedIcon()
-  const composeTip = useTip('New post', `${MOD_KEY}N`, 'bottom')
+  const composeTip = useTip(
+    canCompose ? 'New post' : `${network.name} opens its composer itself`,
+    canCompose ? `${MOD_KEY}N` : null,
+    'bottom',
+  )
 
   return (
     <header
@@ -39,6 +47,7 @@ export function PaneTitlebar() {
         <Button
           size="icon-sm"
           aria-label="New post"
+          disabled={!canCompose}
           onClick={() => {
             go.mutate('compose')
           }}

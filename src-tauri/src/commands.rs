@@ -1,7 +1,8 @@
 //! Every Tauri command, in one place. The shell's and the bridge's commands are
 //! kept apart by the capability files, not by this module: `site_*` are the
-//! ones x.com may call, and each takes the calling webview so it can only
-//! ever speak for its own tab.
+//! ones a network's page may call, and each takes the calling webview so it
+//! can only ever speak for its own tab — and its tab's network is the one
+//! its rows, handle and downloads are checked against.
 
 use std::sync::Mutex;
 
@@ -10,6 +11,7 @@ use tauri::{AppHandle, Manager, State, Webview};
 
 use crate::db::{Counts, Db, Job, Post, PostFilter, ScheduledPost, User, UserFilter};
 use crate::error::{AppError, Result, internal};
+use crate::network::Network;
 use crate::settings::{Settings, SitePrefs, Store, WindowBounds};
 use crate::site::{self, Action, Destination, Insets, Site, SiteState};
 use crate::tooltip::{self, Anchor, Content};
@@ -65,6 +67,12 @@ pub fn get_site_state(app: AppHandle) -> SiteState {
 #[tauri::command]
 pub fn navigate_site(app: AppHandle, destination: Destination) -> Result<()> {
     site::go(&app, destination)
+}
+
+/// Brings a network to the front: its last-used tab, or a new one on its home.
+#[tauri::command]
+pub fn switch_network(app: AppHandle, network: Network) -> Result<u32> {
+    site::activate_network(&app, network)
 }
 
 #[tauri::command]
@@ -197,8 +205,8 @@ pub fn restart_and_install(app: AppHandle) -> Result<()> {
 // ─── Tabs ───────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn new_tab(app: AppHandle, url: Option<String>) -> Result<u32> {
-    site::new_tab(&app, url)
+pub fn new_tab(app: AppHandle, url: Option<String>, network: Option<Network>) -> Result<u32> {
+    site::new_tab(&app, url, network)
 }
 
 #[tauri::command]
@@ -214,8 +222,8 @@ pub fn activate_tab(app: AppHandle, id: u32) -> Result<()> {
 // ─── The store and the tools ────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn get_store_counts(db: State<'_, Db>) -> Result<Counts> {
-    db.counts()
+pub fn get_store_counts(db: State<'_, Db>, network: Option<Network>) -> Result<Counts> {
+    db.counts(network)
 }
 
 #[tauri::command]
@@ -271,8 +279,14 @@ pub fn clear_captured(db: State<'_, Db>) -> Result<()> {
 }
 
 #[tauri::command]
-pub fn start_op(app: AppHandle, kind: String, params: Value, dry_run: bool) -> Result<Job> {
-    ops::start(&app, &kind, params, dry_run, "app", None)
+pub fn start_op(
+    app: AppHandle,
+    network: Network,
+    kind: String,
+    params: Value,
+    dry_run: bool,
+) -> Result<Job> {
+    ops::start(&app, network, &kind, params, dry_run, "app", None)
 }
 
 #[tauri::command]
@@ -286,19 +300,20 @@ pub fn get_ops(app: AppHandle) -> Result<ops::OpsState> {
 }
 
 #[tauri::command]
-pub fn prepare_post(markdown: String) -> compose::Prepared {
-    compose::prepare(&markdown)
+pub fn prepare_post(network: Network, markdown: String) -> Result<compose::Prepared> {
+    compose::prepare(network, &markdown)
 }
 
 #[tauri::command]
-pub fn post_now(app: AppHandle, markdown: String) -> Result<Job> {
-    let prepared = compose::prepare(&markdown);
+pub fn post_now(app: AppHandle, network: Network, markdown: String) -> Result<Job> {
+    let prepared = compose::prepare(network, &markdown)?;
     if prepared.parts.is_empty() {
         return Err(AppError::InvalidInput("Nothing to post.".into()));
     }
     let parts: Vec<String> = prepared.parts.into_iter().map(|p| p.text).collect();
     ops::start(
         &app,
+        network,
         "compose",
         serde_json::json!({ "parts": parts }),
         false,
@@ -311,6 +326,7 @@ pub fn post_now(app: AppHandle, markdown: String) -> Result<Job> {
 pub fn schedule_post(
     app: AppHandle,
     db: State<'_, Db>,
+    network: Network,
     markdown: String,
     scheduled_at: String,
 ) -> Result<ScheduledPost> {
@@ -319,12 +335,13 @@ pub fn schedule_post(
     if when < chrono::Utc::now() {
         return Err(AppError::InvalidInput("That time has passed.".into()));
     }
-    let prepared = compose::prepare(&markdown);
+    let prepared = compose::prepare(network, &markdown)?;
     if prepared.parts.is_empty() {
         return Err(AppError::InvalidInput("Nothing to post.".into()));
     }
     let parts: Vec<String> = prepared.parts.into_iter().map(|p| p.text).collect();
     let post = db.schedule_post(
+        network,
         &parts,
         &crate::scheduled_format(when.with_timezone(&chrono::Utc)),
     )?;
@@ -356,7 +373,14 @@ pub fn tooltip_ready(app: AppHandle, width: f64, height: f64) -> Result<()> {
     tooltip::ready(&app, width, height)
 }
 
-// ─── Bridge (callable from x.com) ───────────────────────────────────────────
+// ─── Bridge (callable from a network's page) ────────────────────────────────
+
+/// The network the calling tab belongs to. A webview that is not a tab —
+/// there is none that can reach these commands — is refused.
+fn caller_network(app: &AppHandle, webview: &Webview) -> Result<Network> {
+    site::network_of_label(app, webview.label())
+        .ok_or_else(|| AppError::NotFound("That tab is gone.".into()))
+}
 
 #[tauri::command]
 pub fn site_settings(state: State<'_, AppState>) -> Result<SitePrefs> {
@@ -373,17 +397,21 @@ pub fn site_navigated(app: AppHandle, webview: Webview, url: String) {
 }
 
 #[tauri::command]
-pub fn site_profile(app: AppHandle, handle: String) -> Result<()> {
-    site::bridge_profile(&app, &handle)
+pub fn site_profile(app: AppHandle, webview: Webview, handle: String) -> Result<()> {
+    site::bridge_profile(&app, webview.label(), &handle)
 }
 
-/// What X loaded into a page, batched. Answers with how many rows were kept.
+/// What the site loaded into a page, batched. Answers with how many rows
+/// were kept.
 #[tauri::command]
 pub fn site_capture(
+    app: AppHandle,
+    webview: Webview,
     state: State<'_, AppState>,
     db: State<'_, Db>,
     batch: capture::Batch,
 ) -> Result<usize> {
+    let network = caller_network(&app, &webview)?;
     let enabled = state
         .settings
         .lock()
@@ -392,7 +420,7 @@ pub fn site_capture(
     if !enabled {
         return Ok(0);
     }
-    let (users, posts, dropped) = capture::sanitize(batch)?;
+    let (users, posts, dropped) = capture::sanitize(network, batch)?;
     if dropped > 0 {
         log::debug!("capture dropped {dropped} malformed rows");
     }
@@ -418,8 +446,9 @@ pub fn site_op_progress(
 }
 
 #[tauri::command]
-pub fn site_download(app: AppHandle, request: download::Request) -> Result<()> {
-    download::start(&app, request)
+pub fn site_download(app: AppHandle, webview: Webview, request: download::Request) -> Result<()> {
+    let network = caller_network(&app, &webview)?;
+    download::start(&app, network, request)
 }
 
 #[tauri::command]

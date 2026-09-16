@@ -8,6 +8,22 @@ All notable changes to Twister are documented here. The format follows
 
 ### Added
 
+- **Bluesky, Threads and Instagram.** Each tab belongs to one network; a
+  row of four glyphs at the top of the sidebar and ⌘⇧1–⌘⇧4 bring a network
+  forward, the sidebar shows the places its site has a page for, and a link
+  from one network to another opens a tab there. The store marks every
+  person and post with its network (the file migrates in place; Meta and X
+  both number things, so a row is keyed by both), the People, Posts and Write
+  panels look at one network at a time, and `twister-mcp` takes a `network`
+  on every tool. Each network on its own terms: X keeps everything; Bluesky
+  gets capture, downloads, hidden navigation, the font, and the operations
+  with lower caps — its signed-in selectors are unexercised, so first runs
+  should be dry runs — and posts one post at a time, counted as 300
+  graphemes; Threads and Instagram are watched only — capture (their inline
+  Relay cache included), scan, export and downloads — and every follow,
+  unfollow, delete or post on them is refused with a reason. Signing out now
+  signs out of every network, since the tabs share one cookie store.
+
 - **Tabs.** Every tab is an X page in its own webview, sharing the session;
   only the front one is shown. Arc-style pills in the titlebar,
   middle-click or ⌘W to close, ⌘T for a new one, Ctrl⇥ / Ctrl⇧⇥ to move

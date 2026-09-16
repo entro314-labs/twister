@@ -1,0 +1,65 @@
+/*
+ * The niceties on bsky.app, as CSS. Every rule is a selector on the app's own
+ * DOM, gated on an attribute the bridge stamps on <html> from the user's
+ * settings, so a stale selector turns a nicety into a no-op, never into a
+ * broken page. Structure read off bsky.app on 2026-09-16: the left column is
+ * the one <nav role="navigation">, the main column is centred by itself, and
+ * posts carry `feedItem-by-*` test ids with `postText` inside.
+ */
+
+/* The app's own left navigation. Twister's sidebar and menu carry the same
+   destinations. The main column is positioned from the centre, so it does
+   not move when the navigation goes. */
+html[data-twister-hide-site-nav] nav[role="navigation"] {
+  display: none !important;
+}
+
+html[data-twister-smooth] {
+  scroll-behavior: smooth !important;
+}
+
+html[data-twister-font] body,
+html[data-twister-font] body * {
+  font-family: var(--twister-font), "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif !important;
+}
+
+/* Text size: the app draws a post's text at 16px in a feed. */
+html[data-twister-text-size="small"] [data-testid="postText"] {
+  font-size: 14px !important;
+  line-height: 19px !important;
+}
+html[data-twister-text-size="large"] [data-testid="postText"] {
+  font-size: 18px !important;
+  line-height: 24px !important;
+}
+
+/* Rounded-square avatars, everywhere the app draws one. */
+html[data-twister-square] [data-testid="userAvatarImage"],
+html[data-twister-square] [data-testid="userAvatarImage"] * {
+  border-radius: 6px !important;
+}
+
+/* The download button the capture script adds to a post's action bar. */
+[data-twister-download] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-left: 4px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: rgb(140, 158, 178);
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+[data-twister-download] svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+[data-twister-download]:hover {
+  background-color: rgba(16, 131, 254, 0.1);
+  color: rgb(16, 131, 254);
+}

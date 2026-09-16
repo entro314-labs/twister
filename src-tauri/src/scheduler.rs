@@ -5,8 +5,8 @@
 //! closed is marked `missed` once it is more than the grace window late,
 //! rather than going out hours after the fact; inside the window it simply
 //! goes. Publishing is the compose operation in `ops.rs`, run against the
-//! signed-in session in the site webview — so it needs the app open and the
-//! account signed in, and says so when it is not.
+//! signed-in session in a tab of the post's network — so it needs the app
+//! open and that account signed in, and says so when it is not.
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::Duration;
@@ -67,15 +67,29 @@ fn pass(app: &AppHandle) -> Result<()> {
         return Ok(());
     }
     if let Some(post) = db.claim_due_post(&scheduled_format(now))? {
-        let signed_in = site::current_state(app).is_some_and(|s| s.handle.is_some());
-        if !signed_in {
-            db.settle_post(post.id, "failed", "Not signed in to X when this was due.")?;
+        if site::handle_on(app, post.network).is_none() {
+            db.settle_post(
+                post.id,
+                "failed",
+                &format!(
+                    "Not signed in to {} when this was due.",
+                    post.network.name()
+                ),
+            )?;
             changed(app);
             return Ok(());
         }
         changed(app);
         let params = json!({ "parts": post.parts });
-        if let Err(err) = ops::start(app, "compose", params, false, "schedule", Some(post.id)) {
+        if let Err(err) = ops::start(
+            app,
+            post.network,
+            "compose",
+            params,
+            false,
+            "schedule",
+            Some(post.id),
+        ) {
             db.settle_post(post.id, "failed", &err.to_string())?;
             changed(app);
         }

@@ -10,6 +10,7 @@ import { Select } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { CLIENT_ACTIONS, RATE_CARD_CHECKED, SELF_SERVE_CUT, dayCost, usd } from '@/lib/api-costs'
 import { MOD_KEY } from '@/lib/chrome'
+import { NETWORKS, NETWORK_ORDER } from '@/lib/networks'
 import {
   useClearCaptured,
   useOpenDownloadsDir,
@@ -29,7 +30,7 @@ import {
 } from '@/lib/query'
 import { queryKeys } from '@/lib/query/keys'
 import { humanMessage } from '@/lib/tauri/client'
-import type { Niceties, Settings, UpdateChannel } from '@/lib/tauri/types'
+import type { Network, Niceties, Settings, UpdateChannel } from '@/lib/tauri/types'
 import { describeUpdateFailure, formatUpdateSize, updateProgressPercent } from '@/lib/update'
 import { cn } from '@/lib/utils'
 
@@ -182,6 +183,10 @@ const SHORTCUTS: Array<{ keys: string; does: string }> = [
     keys: `${MOD_KEY}1 – ${MOD_KEY}6`,
     does: 'Home, Explore, Notifications, Messages, Bookmarks, Profile',
   },
+  {
+    keys: `${MOD_KEY}⇧1 – ${MOD_KEY}⇧4`,
+    does: 'X, Bluesky, Threads, Instagram',
+  },
   { keys: `${MOD_KEY}N`, does: 'New post' },
   { keys: `${MOD_KEY}T  ${MOD_KEY}W`, does: 'New tab, close tab' },
   { keys: 'Ctrl⇥  Ctrl⇧⇥', does: 'Next tab, previous tab' },
@@ -258,7 +263,7 @@ function SettingsScreen() {
 
       <Section
         title="The look"
-        note="Posts and the composer the way a classic client drew them. Selectors on X’s page, like the niceties: one that stops matching does nothing until it is fixed."
+        note="Posts and the composer the way a classic client drew them, on X. Selectors on X’s page, like the niceties: one that stops matching does nothing until it is fixed. The font, the text size and rounded avatars reach Bluesky too; Meta’s pages keep their own look."
       >
         <Row
           label="Font on X"
@@ -311,7 +316,7 @@ function SettingsScreen() {
 
       <Section
         title="Niceties"
-        note="What Twister changes about X. Each one is a selector on X’s own page, which X changes without notice — one that stops working can be switched off here until the next update."
+        note="What Twister changes about X. Each one is a selector on X’s own page, which X changes without notice — one that stops working can be switched off here until the next update. On Bluesky, hiding the site’s navigation and smooth scrolling apply as well; the download button and the store watch every network."
       >
         {NICETIES.map((nicety) => (
           <Row key={nicety.key} label={nicety.label} hint={nicety.hint}>
@@ -429,24 +434,37 @@ function ApiCostsSection() {
 }
 
 /**
- * The session is X's, held in the site view's own cookie store; Twister never reads it. Signing out
- * clears that store, which is the only thing Twister can do to it.
+ * The sessions are the sites', held in the tabs' shared cookie store; Twister never reads them.
+ * Signing out clears that store — all of it, every network at once, since the tabs share one —
+ * which is the only thing Twister can do to it.
  */
 function AccountSection() {
   const site = useSiteState()
   const signOut = useSignOut()
   const [confirming, setConfirming] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const handles = site.data?.handles ?? {}
+  const signedIn = NETWORK_ORDER.filter((network) => handles[network])
 
   return (
-    <Section title="Account">
+    <Section
+      title="Accounts"
+      note="Each site shows its own sign-in form in the island; Twister sees a handle once the site draws its navigation. Sessions live in the site views, not in Twister."
+    >
+      {NETWORK_ORDER.map((network) => (
+        <Row
+          key={network}
+          label={NETWORKS[network].name}
+          hint={handles[network] ? `@${handles[network]}` : 'Not signed in yet'}
+        >
+          <span className="text-xs text-muted-foreground">
+            {handles[network] ? 'Signed in' : ''}
+          </span>
+        </Row>
+      ))}
       <Row
-        label={site.data?.handle ? `@${site.data.handle}` : 'Not signed in yet'}
-        hint={
-          site.data?.handle
-            ? 'Signed in on X. Your session lives in the site view, not in Twister.'
-            : 'X shows its own sign-in form in the island. Twister sees the handle once X draws its navigation.'
-        }
+        label={signedIn.length ? 'Sign out everywhere' : 'Sign out'}
+        hint="The tabs share one cookie store, so signing out forgets every site’s session at once."
       >
         {confirming ? (
           <div className="flex items-center gap-1.5">
@@ -491,8 +509,8 @@ function AccountSection() {
       </Row>
       {confirming ? (
         <p className="px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-          Clears every cookie and all site data X has stored in this app, then returns to X’s front
-          door. Your account itself is untouched.
+          Clears every cookie and all site data the sites have stored in this app, then returns to
+          the front door of the site in front. Your accounts themselves are untouched.
         </p>
       ) : null}
       {error ? <p className="px-3 py-2 text-xs text-destructive">{error}</p> : null}
@@ -621,11 +639,20 @@ function StoreSection() {
   return (
     <Section
       title="The store"
-      note="What the People and Posts tools work from: the people and posts X loaded into a tab while Twister watched. One SQLite file in the app data directory, and the agent door (twister-mcp) reads the same file."
+      note="What the People and Posts tools work from: the people and posts each site loaded into a tab while Twister watched. One SQLite file in the app data directory, every row marked with its network, and the agent door (twister-mcp) reads the same file."
     >
       <Row
         label={`${people.toLocaleString()} people, ${posts.toLocaleString()} posts`}
-        hint="Grows as you browse and as you scan pages from the tools."
+        hint={
+          counts.data?.networks.length
+            ? counts.data.networks
+                .map(
+                  ([network, rows]) =>
+                    `${NETWORKS[network as Network]?.name ?? network}: ${rows.toLocaleString()}`,
+                )
+                .join(' · ')
+            : 'Grows as you browse and as you scan pages from the tools.'
+        }
       >
         {confirming ? (
           <div className="flex items-center gap-1.5">
@@ -697,10 +724,10 @@ function AboutSection() {
         <span className="text-xs text-muted-foreground">Tauri 2 · React 19</span>
       </Row>
       <p className="px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
-        A desktop client for X with niceties injected. The page in the island is X’s own site, in
-        its own view, with its own session; Twister frames it, keeps the shortcuts, opens links
-        outside in your browser, and hides what you ask it to. Nothing you read or write passes
-        through Twister.
+        A desktop client for X, Bluesky, Threads and Instagram with niceties injected. The page in
+        the island is the site’s own, in its own view, with its own session; Twister frames it,
+        keeps the shortcuts, opens links outside in your browser, and hides what you ask it to.
+        Nothing you read or write passes through Twister.
       </p>
     </Section>
   )

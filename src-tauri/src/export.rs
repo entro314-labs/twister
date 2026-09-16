@@ -87,6 +87,7 @@ pub fn users_csv(users: &[User]) -> String {
         "created_at".into(),
         "source".into(),
         "last_seen".into(),
+        "network".into(),
         "url".into(),
     ]));
     for user in users {
@@ -106,7 +107,8 @@ pub fn users_csv(users: &[User]) -> String {
             user.created_at.clone(),
             user.source.clone(),
             user.last_seen.clone(),
-            format!("https://x.com/{}", user.handle),
+            user.network.slug().into(),
+            user.url(),
         ]));
     }
     out
@@ -127,6 +129,7 @@ pub fn posts_csv(posts: &[Post]) -> String {
         "bookmarked".into(),
         "media".into(),
         "source".into(),
+        "network".into(),
         "url".into(),
     ]));
     for post in posts {
@@ -147,6 +150,7 @@ pub fn posts_csv(posts: &[Post]) -> String {
                 .collect::<Vec<_>>()
                 .join(" "),
             post.source.clone(),
+            post.network.slug().into(),
             post.url(),
         ]));
     }
@@ -192,12 +196,13 @@ pub fn users_markdown(users: &[User]) -> String {
     for user in users {
         let _ = writeln!(
             out,
-            "| [@{0}](https://x.com/{0}) | {1} | {2} | {3} | {4} |",
+            "| [@{0}]({5}) | {1} | {2} | {3} | {4} |",
             user.handle,
             user.name.replace('|', "\\|"),
             user.followers,
             user.following,
-            user.bio.replace('|', "\\|").replace('\n', " ")
+            user.bio.replace('|', "\\|").replace('\n', " "),
+            user.url()
         );
     }
     out
@@ -267,7 +272,13 @@ mod tests {
         assert!(lines[0].starts_with("\u{feff}handle,name,bio"));
         assert!(lines[1].starts_with("alice,\"Alice, PhD\","));
         assert!(lines[1].contains(",yes,,"));
-        assert!(lines[1].ends_with("https://x.com/alice"));
+        assert!(lines[1].ends_with(",x,https://x.com/alice"));
+        let bluesky = users_csv(&[User {
+            network: crate::network::Network::Bluesky,
+            handle: "alice.bsky.social".into(),
+            ..User::default()
+        }]);
+        assert!(bluesky.ends_with(",bluesky,https://bsky.app/profile/alice.bsky.social\r\n"));
     }
 
     #[test]

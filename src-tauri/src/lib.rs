@@ -1,8 +1,9 @@
-//! Twister — a desktop client for X with niceties injected.
+//! Twister — a desktop client for X, Bluesky, Threads and Instagram with
+//! niceties injected.
 //!
 //! One window, child webviews: the shell (this app's React frame) and one
-//! site webview per tab (x.com, with the bridge, capture and operations
-//! scripts). The window is created here rather than in `tauri.conf.json`
+//! site webview per tab (a network's page, with that network's bridge,
+//! capture and operations scripts). The window is created here rather than in `tauri.conf.json`
 //! because a configured window is a single-webview window, and the whole
 //! design rests on there being several.
 
@@ -15,6 +16,7 @@ mod error;
 mod export;
 pub mod mcp;
 mod menu;
+pub mod network;
 mod ops;
 mod scheduler;
 pub mod settings;
@@ -99,6 +101,7 @@ pub fn run() {
             commands::update_settings,
             commands::get_site_state,
             commands::navigate_site,
+            commands::switch_network,
             commands::site_action,
             commands::set_site_insets,
             commands::set_site_visible,

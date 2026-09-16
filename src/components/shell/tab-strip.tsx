@@ -3,7 +3,6 @@ import type { ArcTabItem } from '@entro314labs/react-arc-tabs'
 import {
   IconBell,
   IconBookmark,
-  IconBrandX,
   IconCompass,
   IconHome,
   IconMail,
@@ -16,12 +15,14 @@ import { useNavigate, useRouterState } from '@tanstack/react-router'
 import * as React from 'react'
 
 import { MOD_KEY } from '@/lib/chrome'
+import { NETWORKS } from '@/lib/networks'
 import { useActivateTab, useCloseTab, useNewTab, useSiteState } from '@/lib/query'
 import type { Section, TabState } from '@/lib/tauri/types'
 import { useTip } from '@/lib/tooltip'
 import { cn } from '@/lib/utils'
 
-const SECTION_ICON: Record<Section, React.ElementType> = {
+/** The section's glyph; anywhere else on the site, the network's own mark. */
+const SECTION_ICON: Record<Exclude<Section, 'other'>, React.ElementType> = {
   home: IconHome,
   explore: IconCompass,
   notifications: IconBell,
@@ -29,13 +30,12 @@ const SECTION_ICON: Record<Section, React.ElementType> = {
   bookmarks: IconBookmark,
   profile: IconUser,
   compose: IconPencil,
-  other: IconBrandX,
 }
 
 /**
- * The open tabs: each one an X page in its own webview. The strip fills the middle of the island's
- * titlebar and is a drag region like the rest of it — the library owns the strip's DOM, so the
- * attribute Tauri looks for is stamped onto its list elements after mount. Tabs themselves stay
+ * The open tabs: each one a network's page in its own webview. The strip fills the middle of the
+ * island's titlebar and is a drag region like the rest of it — the library owns the strip's DOM, so
+ * the attribute Tauri looks for is stamped onto its list elements after mount. Tabs themselves stay
  * clickable.
  */
 export function TabStrip() {
@@ -64,7 +64,12 @@ export function TabStrip() {
   const active = state?.active ?? 0
 
   const items = React.useMemo<ArcTabItem[]>(
-    () => tabs.map((tab) => ({ id: String(tab.id), label: tab.title || 'X', content: null })),
+    () =>
+      tabs.map((tab) => ({
+        id: String(tab.id),
+        label: tab.title || NETWORKS[tab.network].name,
+        content: null,
+      })),
     [tabs],
   )
   const byId = React.useMemo(() => new Map(tabs.map((tab) => [String(tab.id), tab])), [tabs])
@@ -142,7 +147,7 @@ function TabLabel({
   active: boolean
   onClose: () => void
 }) {
-  const Icon = SECTION_ICON[tab.section]
+  const Icon = tab.section === 'other' ? NETWORKS[tab.network].icon : SECTION_ICON[tab.section]
   const closeTip = useTip('Close tab', `${MOD_KEY}W`, 'bottom')
   return (
     <span
@@ -163,7 +168,7 @@ function TabLabel({
         ) : null}
       </span>
       <span className={cn('truncate text-xs', active ? 'font-semibold' : 'font-medium')}>
-        {tab.title || 'X'}
+        {tab.title || NETWORKS[tab.network].name}
       </span>
       {closable ? (
         <button

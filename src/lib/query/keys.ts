@@ -1,4 +1,4 @@
-import type { PersonFilter, PostFilter } from '@/lib/tauri/types'
+import type { Network, PersonFilter, PostFilter } from '@/lib/tauri/types'
 
 /** Centralised query keys: the settings file, the site state Rust pushes, and the store. */
 export const queryKeys = {
@@ -16,7 +16,7 @@ export const queryKeys = {
   },
   store: {
     root: ['store'] as const,
-    counts: () => [...queryKeys.store.root, 'counts'] as const,
+    counts: (network: Network | null) => [...queryKeys.store.root, 'counts', network] as const,
     people: (filter: PersonFilter) => [...queryKeys.store.root, 'people', filter] as const,
     posts: (filter: PostFilter) => [...queryKeys.store.root, 'posts', filter] as const,
   },

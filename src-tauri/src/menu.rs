@@ -9,6 +9,7 @@ use tauri::menu::{
 };
 use tauri::{AppHandle, Emitter, EventTarget, Runtime};
 
+use crate::network::{self, Network};
 use crate::site::{self, Action, Destination, SHELL_LABEL};
 
 /// Something the shell has to act on rather than the site: opening its own
@@ -120,6 +121,17 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .select_all()
         .build()?;
 
+    // One item per network, ⌘⇧1 to ⌘⇧4 in the order the sidebar shows them.
+    let mut networks = SubmenuBuilder::new(app, "Network");
+    for (index, network) in network::ALL.iter().enumerate() {
+        networks = networks.item(
+            &MenuItemBuilder::with_id(format!("network:{}", network.slug()), network.name())
+                .accelerator(format!("CmdOrCtrl+Shift+{}", index + 1))
+                .build(app)?,
+        );
+    }
+    let networks = networks.build()?;
+
     let mut view = SubmenuBuilder::new(app, "View");
     for (id, label, accelerator, _) in NAV {
         view = view.item(
@@ -129,6 +141,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         );
     }
     let view = view
+        .separator()
+        .item(&networks)
         .separator()
         .item(
             &MenuItemBuilder::with_id("site:back", "Back")
@@ -202,7 +216,7 @@ pub fn handle(app: &AppHandle, event: MenuEvent) {
         "site:forward" => site::act(app, Action::Forward),
         "site:reload" => site::act(app, Action::Reload),
         "nav:compose" => site::go(app, Destination::Compose),
-        "tab:new" => site::new_tab(app, None).map(|_| ()),
+        "tab:new" => site::new_tab(app, None, None).map(|_| ()),
         "tab:close" => match site::state(app).active {
             0 => Ok(()),
             id => site::close_tab(app, id),
@@ -215,9 +229,13 @@ pub fn handle(app: &AppHandle, event: MenuEvent) {
         "shell:posts" => emit_shell(app, ShellAction::OpenPosts),
         "shell:compose" => emit_shell(app, ShellAction::OpenCompose),
         "shell:update" => emit_shell(app, ShellAction::CheckForUpdate),
-        _ => match NAV.iter().find(|(nav_id, ..)| *nav_id == id) {
-            Some((_, _, _, destination)) => site::go(app, *destination),
-            None => return,
+        _ => match (
+            NAV.iter().find(|(nav_id, ..)| *nav_id == id),
+            id.strip_prefix("network:").and_then(Network::parse),
+        ) {
+            (Some((_, _, _, destination)), _) => site::go(app, *destination),
+            (None, Some(network)) => site::activate_network(app, network).map(|_| ()),
+            (None, None) => return,
         },
     };
     if let Err(err) = result {

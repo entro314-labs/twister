@@ -1,22 +1,22 @@
 //! What the page sends the store, and the checks it goes through first.
 //!
-//! `site/capture.js` reads X's own API responses as the page receives them
-//! and batches the people and posts it finds into `site_capture`. The page
-//! is not trusted: anything running on x.com could call that command, so
-//! every field is bounded here before it reaches SQLite — ids must be
-//! digits, handles must be handles, media URLs must be X's CDN, and text is
-//! cut to a size that cannot bloat the file.
+//! Each network's `capture.js` reads the site's own API responses as the
+//! page receives them and batches the people and posts it finds into
+//! `site_capture`. The page is not trusted: anything running on the site
+//! could call that command, so every field is bounded here before it reaches
+//! SQLite — ids and handles must fit the network's own rule, media URLs must
+//! be its CDN, and text is cut to a size that cannot bloat the file. The
+//! network is the calling tab's, never the page's word.
 
 use serde::Deserialize;
 
 use crate::db::{Media, Post, User};
 use crate::error::{AppError, Result};
-use crate::site::valid_handle;
+use crate::network::Network;
 
 /// Per call. The hook batches a few hundred milliseconds of traffic, which is
 /// never more than a couple of timeline pages.
 const MAX_ITEMS: usize = 1000;
-const MAX_ID: usize = 25;
 const MAX_SHORT: usize = 200;
 const MAX_BIO: usize = 2000;
 const MAX_TEXT: usize = 20_000;
@@ -26,32 +26,30 @@ const MAX_URL: usize = 1000;
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Batch {
-    /// The GraphQL operation the page called, from the request URL.
+    /// The operation the page called, from the request: X's GraphQL name,
+    /// Bluesky's XRPC method, Meta's query name.
     pub source: String,
     pub users: Vec<User>,
     pub posts: Vec<Post>,
 }
 
-pub fn valid_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= MAX_ID && id.bytes().all(|b| b.is_ascii_digit())
-}
-
-/// A source is an operation name: `UserTweets`, `Following`, `Bookmarks`.
+/// A source is an operation name: `UserTweets`, `app.bsky.feed.getAuthorFeed`,
+/// `BarcelonaProfileThreadsTabQuery`.
 pub fn valid_source(source: &str) -> bool {
     !source.is_empty()
-        && source.len() <= 64
+        && source.len() <= 80
         && source
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'.')
 }
 
-fn media_url_ok(url: &str) -> bool {
+fn media_url_ok(network: Network, url: &str) -> bool {
     url.len() <= MAX_URL
         && url::Url::parse(url).is_ok_and(|parsed| {
             parsed.scheme() == "https"
                 && parsed
                     .host_str()
-                    .is_some_and(|host| host == "twimg.com" || host.ends_with(".twimg.com"))
+                    .is_some_and(|host| network.media_host_ok(host))
         })
 }
 
@@ -78,7 +76,7 @@ fn rfc3339_or_empty(value: &str) -> String {
 /// Everything that passes, with the rest dropped and counted. A batch with
 /// more items than the cap is refused whole: that is not traffic, that is
 /// something else calling the command.
-pub fn sanitize(batch: Batch) -> Result<(Vec<User>, Vec<Post>, usize)> {
+pub fn sanitize(network: Network, batch: Batch) -> Result<(Vec<User>, Vec<Post>, usize)> {
     if batch.users.len() > MAX_ITEMS || batch.posts.len() > MAX_ITEMS {
         return Err(AppError::InvalidInput("Capture batch too large.".into()));
     }
@@ -90,11 +88,12 @@ pub fn sanitize(batch: Batch) -> Result<(Vec<User>, Vec<Post>, usize)> {
     let mut dropped = 0;
     let mut users = Vec::with_capacity(batch.users.len());
     for user in batch.users {
-        if !valid_id(&user.id) || !valid_handle(&user.handle) {
+        if !network.valid_id(&user.id) || !network.valid_handle(&user.handle) {
             dropped += 1;
             continue;
         }
         users.push(User {
+            network,
             id: user.id,
             handle: user.handle,
             name: clip(&user.name, MAX_SHORT),
@@ -106,7 +105,7 @@ pub fn sanitize(batch: Batch) -> Result<(Vec<User>, Vec<Post>, usize)> {
             posts: user.posts.max(0),
             verified: user.verified,
             protected: user.protected,
-            avatar: if media_url_ok(&user.avatar) {
+            avatar: if media_url_ok(network, &user.avatar) {
                 user.avatar
             } else {
                 String::new()
@@ -121,7 +120,10 @@ pub fn sanitize(batch: Batch) -> Result<(Vec<User>, Vec<Post>, usize)> {
     }
     let mut posts = Vec::with_capacity(batch.posts.len());
     for post in batch.posts {
-        if !valid_id(&post.id) || !valid_handle(&post.author_handle) {
+        if !network.valid_id(&post.id)
+            || !network.valid_handle(&post.author_handle)
+            || !network.valid_slug(&post.slug)
+        {
             dropped += 1;
             continue;
         }
@@ -134,13 +136,21 @@ pub fn sanitize(batch: Batch) -> Result<(Vec<User>, Vec<Post>, usize)> {
             .into_iter()
             .filter(|m| {
                 matches!(m.kind.as_str(), "photo" | "video" | "animated_gif")
-                    && media_url_ok(&m.url)
+                    && media_url_ok(network, &m.url)
             })
             .take(MAX_MEDIA)
             .collect();
-        let optional_id = |id: String| if valid_id(&id) { id } else { String::new() };
+        let optional_id = |id: String| {
+            if network.valid_id(&id) {
+                id
+            } else {
+                String::new()
+            }
+        };
         posts.push(Post {
+            network,
             id: post.id,
+            slug: post.slug,
             author_id: optional_id(post.author_id),
             author_handle: post.author_handle,
             text: clip(&post.text, MAX_TEXT),
@@ -169,21 +179,89 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ids_sources_and_media_hosts_are_checked() {
-        assert!(valid_id("1234567890"));
-        assert!(!valid_id(""));
-        assert!(!valid_id("12a"));
-        assert!(!valid_id(&"1".repeat(26)));
+    fn sources_and_media_hosts_are_checked() {
         assert!(valid_source("UserTweets"));
+        assert!(valid_source("app.bsky.feed.getAuthorFeed"));
         assert!(!valid_source("User Tweets"));
         assert!(!valid_source(""));
-        assert!(media_url_ok("https://pbs.twimg.com/media/a.jpg?name=orig"));
+        let x = Network::X;
         assert!(media_url_ok(
+            x,
+            "https://pbs.twimg.com/media/a.jpg?name=orig"
+        ));
+        assert!(media_url_ok(
+            x,
             "https://video.twimg.com/ext_tw_video/1/pu/vid/720x1280/a.mp4"
         ));
-        assert!(!media_url_ok("http://pbs.twimg.com/media/a.jpg"));
-        assert!(!media_url_ok("https://evil.example/twimg.com/a.jpg"));
-        assert!(!media_url_ok("https://twimg.com.evil.example/a.jpg"));
+        assert!(!media_url_ok(x, "http://pbs.twimg.com/media/a.jpg"));
+        assert!(!media_url_ok(x, "https://evil.example/twimg.com/a.jpg"));
+        assert!(!media_url_ok(x, "https://twimg.com.evil.example/a.jpg"));
+        assert!(!media_url_ok(x, "https://cdn.bsky.app/img/a"));
+        assert!(media_url_ok(
+            Network::Bluesky,
+            "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:a/bafy"
+        ));
+    }
+
+    #[test]
+    fn rows_are_checked_against_the_calling_networks_rules() {
+        let batch = Batch {
+            source: "app.bsky.feed.getAuthorFeed".into(),
+            users: vec![User {
+                id: "did:plc:z72i7hdynmk6r22z27h6tvur".into(),
+                handle: "bsky.app".into(),
+                ..User::default()
+            }],
+            posts: vec![Post {
+                id: "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.post/3l6oveex3ii2l".into(),
+                author_handle: "bsky.app".into(),
+                ..Post::default()
+            }],
+        };
+        // On X these are nonsense; on Bluesky they are the rule.
+        let (users, posts, dropped) = sanitize(Network::X, batch.clone()).expect("ok");
+        assert!(users.is_empty() && posts.is_empty());
+        assert_eq!(dropped, 2);
+        let (users, posts, dropped) = sanitize(Network::Bluesky, batch).expect("ok");
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].network, Network::Bluesky);
+        assert_eq!(posts.len(), 1);
+        assert_eq!(dropped, 0);
+        // Meta rows carry a shortcode; X rows must not.
+        let (_, posts, _) = sanitize(
+            Network::Threads,
+            Batch {
+                source: "Q".into(),
+                users: vec![],
+                posts: vec![Post {
+                    id: "398".into(),
+                    slug: "DdU1-6okapE".into(),
+                    author_handle: "zuck".into(),
+                    ..Post::default()
+                }],
+            },
+        )
+        .expect("ok");
+        assert_eq!(
+            posts[0].url(),
+            "https://www.threads.com/@zuck/post/DdU1-6okapE"
+        );
+        let (_, posts, dropped) = sanitize(
+            Network::X,
+            Batch {
+                source: "Q".into(),
+                users: vec![],
+                posts: vec![Post {
+                    id: "398".into(),
+                    slug: "abc".into(),
+                    author_handle: "dom".into(),
+                    ..Post::default()
+                }],
+            },
+        )
+        .expect("ok");
+        assert!(posts.is_empty());
+        assert_eq!(dropped, 1);
     }
 
     #[test]
@@ -241,8 +319,9 @@ mod tests {
                 },
             ],
         };
-        let (users, posts, dropped) = sanitize(batch).expect("ok");
+        let (users, posts, dropped) = sanitize(Network::X, batch).expect("ok");
         assert_eq!(users.len(), 1);
+        assert_eq!(users[0].network, Network::X);
         assert_eq!(users[0].bio.len(), MAX_BIO);
         assert_eq!(users[0].followers, 0);
         assert_eq!(users[0].avatar, "");
@@ -263,16 +342,19 @@ mod tests {
             users: (0..=MAX_ITEMS).map(|_| User::default()).collect(),
             posts: vec![],
         };
-        assert!(sanitize(too_many).is_err());
-        let (users, _, _) = sanitize(Batch {
-            source: "bad source!".into(),
-            users: vec![User {
-                id: "1".into(),
-                handle: "a".into(),
-                ..User::default()
-            }],
-            posts: vec![],
-        })
+        assert!(sanitize(Network::X, too_many).is_err());
+        let (users, _, _) = sanitize(
+            Network::X,
+            Batch {
+                source: "bad source!".into(),
+                users: vec![User {
+                    id: "1".into(),
+                    handle: "a".into(),
+                    ..User::default()
+                }],
+                posts: vec![],
+            },
+        )
         .expect("ok");
         assert_eq!(users[0].source, "Unknown");
     }

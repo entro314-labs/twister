@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 use crate::db::{Db, PostFilter, UserFilter};
 use crate::error::{AppError, Result};
 use crate::export::{self, Format};
+use crate::network::{self, Network};
 use crate::{compose, ops};
 
 const PROTOCOL_VERSION: &str = "2026-07-28";
@@ -41,11 +42,14 @@ impl Session {
                 "capabilities": { "tools": { "listChanged": false } },
                 "serverInfo": { "name": "twister", "version": env!("CARGO_PKG_VERSION") },
                 "instructions":
-                    "Twister is a desktop client for X. This server reads the people and posts \
-                     the app has seen X load (it never calls X's API itself) and queues \
-                     operations the app runs in its signed-in page. Queued jobs run only while \
-                     the Twister app is open, one at a time, and default to dry runs. Call \
-                     store_summary first to learn what has been captured and from where."
+                    "Twister is a desktop client for X, Bluesky, Threads and Instagram. This \
+                     server reads the people and posts the app has seen each site load (it never \
+                     calls an API itself) and queues operations the app runs in its signed-in \
+                     page on one network. Queued jobs run only while the Twister app is open, one \
+                     at a time, and default to dry runs; Threads and Instagram accept scans only. \
+                     Every row carries a `network` (x, bluesky, threads, instagram). Call \
+                     store_summary first to learn what has been captured, where, and from which \
+                     source."
             })),
             "tools/list" => Ok(json!({ "tools": tools() })),
             "tools/call" => self.call(&params),
@@ -92,13 +96,31 @@ impl Session {
     }
 
     fn summary(&self) -> Result<String> {
-        let counts = self.db.counts()?;
+        let counts = self.db.counts(None)?;
         Ok(serde_json::to_string_pretty(&json!({
             "users": counts.users,
             "posts": counts.posts,
+            "networks": counts.networks.iter().map(|(s, n)| json!({ "network": s, "rows": n })).collect::<Vec<_>>(),
             "sources": counts.sources.iter().map(|(s, n)| json!({ "source": s, "rows": n })).collect::<Vec<_>>(),
-            "note": "Rows are what the Twister app saw X load. To see more of a list, queue a `scan` job for its page."
+            "note": "Rows are what the Twister app saw a site load. To see more of a list, queue a `scan` job for its page on its network."
         }))?)
+    }
+
+    /// The `network` argument, X when absent.
+    fn network_arg(args: &Value) -> Result<Network> {
+        match args.get("network").and_then(Value::as_str) {
+            None => Ok(Network::default()),
+            Some(slug) => Network::parse(slug).ok_or_else(|| {
+                AppError::InvalidInput(format!(
+                    "unknown network `{slug}`; one of {}",
+                    network::ALL
+                        .iter()
+                        .map(|n| n.slug())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            }),
+        }
     }
 
     fn export(&self, args: &Value) -> Result<String> {
@@ -133,22 +155,25 @@ impl Session {
     }
 
     fn queue(&self, args: &Value) -> Result<String> {
+        let network = Self::network_arg(args)?;
         let kind = args.get("kind").and_then(Value::as_str).unwrap_or("");
         let params = args.get("params").cloned().unwrap_or(json!({}));
         let dry_run = args.get("dryRun").and_then(Value::as_bool).unwrap_or(true);
-        ops::validate(kind, &params)?;
+        ops::validate(network, kind, &params)?;
         let job = self
             .db
-            .create_job(kind, &params.to_string(), dry_run, "mcp")?;
+            .create_job(network, kind, &params.to_string(), dry_run, "mcp")?;
         Ok(format!(
-            "Queued job {} ({kind}{}). It runs inside the Twister app, which must be open and \
-             signed in; check list_jobs for the outcome.",
+            "Queued job {} ({kind} on {}{}). It runs inside the Twister app, which must be open \
+             and signed in there; check list_jobs for the outcome.",
             job.id,
+            network.name(),
             if dry_run { ", dry run" } else { "" }
         ))
     }
 
     fn schedule(&self, args: &Value) -> Result<String> {
+        let network = Self::network_arg(args)?;
         let markdown = args
             .get("markdown")
             .and_then(Value::as_str)
@@ -161,19 +186,22 @@ impl Session {
             })?;
         let when = chrono::DateTime::parse_from_rfc3339(when)
             .map_err(|e| AppError::InvalidInput(format!("`scheduledAt` is not RFC 3339: {e}")))?;
-        let prepared = compose::prepare(markdown);
+        let prepared = compose::prepare(network, markdown)?;
         if prepared.parts.is_empty() {
             return Err(AppError::InvalidInput("Nothing to post.".into()));
         }
         let parts: Vec<String> = prepared.parts.into_iter().map(|p| p.text).collect();
         let post = self.db.schedule_post(
+            network,
             &parts,
             &crate::scheduled_format(when.with_timezone(&chrono::Utc)),
         )?;
         Ok(format!(
-            "Scheduled post {} for {} as {} part(s). It goes out only while the Twister app is \
-             open and signed in; more than 15 minutes late and it is marked missed instead.",
+            "Scheduled post {} on {} for {} as {} part(s). It goes out only while the Twister \
+             app is open and signed in there; more than 15 minutes late and it is marked missed \
+             instead.",
             post.id,
+            network.name(),
             post.scheduled_at,
             parts.len()
         ))
@@ -184,12 +212,20 @@ fn tool(name: &str, description: &str, schema: Value) -> Value {
     json!({ "name": name, "description": description, "inputSchema": schema })
 }
 
+// One table of tools, each with its schema beside it.
+#[allow(clippy::too_many_lines)]
 fn tools() -> Vec<Value> {
+    let network = json!({
+        "type": "string",
+        "enum": network::ALL.iter().map(|n| n.slug()).collect::<Vec<_>>(),
+        "description": "Which network. Defaults to x."
+    });
     let user_filter = json!({
         "type": "object",
         "properties": {
+            "network": network,
             "search": { "type": "string", "description": "Substring of handle, name or bio." },
-            "source": { "type": "string", "description": "The X operation that loaded them: Following, Followers, ListMembers…" },
+            "source": { "type": "string", "description": "The operation that loaded them: X's Following, Followers, ListMembers; Bluesky's app.bsky.graph.getFollows…" },
             "followsMe": { "type": "boolean" },
             "followedByMe": { "type": "boolean" },
             "verified": { "type": "boolean" },
@@ -203,8 +239,9 @@ fn tools() -> Vec<Value> {
     let post_filter = json!({
         "type": "object",
         "properties": {
+            "network": network,
             "search": { "type": "string" },
-            "source": { "type": "string", "description": "Bookmarks, UserTweets, ListLatestTweetsTimeline, HomeTimeline…" },
+            "source": { "type": "string", "description": "X: Bookmarks, UserTweets, HomeTimeline… Bluesky: app.bsky.feed.getAuthorFeed… Meta: the query name." },
             "kind": { "type": "string", "enum": ["post", "reply", "repost", "quote"] },
             "author": { "type": "string" },
             "bookmarked": { "type": "boolean" },
@@ -218,7 +255,7 @@ fn tools() -> Vec<Value> {
     vec![
         tool(
             "store_summary",
-            "How many people and posts the app has captured, by source.",
+            "How many people and posts the app has captured, by network and by source.",
             json!({ "type": "object", "properties": {} }),
         ),
         tool(
@@ -247,10 +284,11 @@ fn tools() -> Vec<Value> {
         ),
         tool(
             "queue_job",
-            "Queue an operation for the app to run in its signed-in page: scan (scroll a page to the end, capturing what loads; params.page such as /i/bookmarks or /handle/following), follow or unfollow (params.handles and params.page, the list page holding them), delete (params.ids and params.page, your profile). Dry run unless dryRun is false.",
+            "Queue an operation for the app to run in its signed-in page on one network: scan (scroll a page to the end, capturing what loads; params.page such as /i/bookmarks or /handle/following on X, /saved or /profile/handle/follows on Bluesky, /@handle on Threads, /handle/ on Instagram), follow or unfollow (params.handles and params.page, the list page holding them), delete (params.ids and params.page, your profile). Threads and Instagram take scans only. Dry run unless dryRun is false.",
             json!({
                 "type": "object",
                 "properties": {
+                    "network": network,
                     "kind": { "type": "string", "enum": ["scan", "follow", "unfollow", "delete"] },
                     "params": { "type": "object" },
                     "dryRun": { "type": "boolean", "default": true }
@@ -265,10 +303,11 @@ fn tools() -> Vec<Value> {
         ),
         tool(
             "schedule_post",
-            "Schedule a post or thread. Markdown: **bold**, *italic*, `code`, lists, and --- for a thread break; long text is split at 280.",
+            "Schedule a post or thread on X or Bluesky. Markdown: **bold**, *italic*, `code`, lists, and --- for a thread break; long text is split at the network's limit (280 weighted on X, 300 graphemes on Bluesky).",
             json!({
                 "type": "object",
                 "properties": {
+                    "network": network,
                     "markdown": { "type": "string" },
                     "scheduledAt": { "type": "string", "description": "RFC 3339 with offset." }
                 },
@@ -374,6 +413,25 @@ mod tests {
         assert_eq!(jobs.len(), 1);
         assert!(jobs[0].dry_run);
         assert_eq!(jobs[0].origin, "mcp");
+        assert_eq!(jobs[0].network, Network::X);
+        let bluesky = call(
+            &session,
+            "queue_job",
+            json!({ "network": "bluesky", "kind": "scan", "params": { "page": "/saved" } }),
+        );
+        assert!(text_of(&bluesky).contains("on Bluesky"));
+        let refused = call(
+            &session,
+            "queue_job",
+            json!({ "network": "threads", "kind": "follow", "params": { "handles": ["zuck"], "page": "/@zuck" } }),
+        );
+        assert_eq!(refused["result"]["isError"], true);
+        let unknown = call(
+            &session,
+            "queue_job",
+            json!({ "network": "myspace", "kind": "scan", "params": {} }),
+        );
+        assert_eq!(unknown["result"]["isError"], true);
     }
 
     #[test]
@@ -386,6 +444,18 @@ mod tests {
         );
         assert!(text_of(&ok).contains("2030-01-01T07:00:00Z"));
         assert!(text_of(&ok).contains("2 part(s)"));
+        let bluesky = call(
+            &session,
+            "schedule_post",
+            json!({ "network": "bluesky", "markdown": "hi", "scheduledAt": "2030-01-01T09:00:00Z" }),
+        );
+        assert!(text_of(&bluesky).contains("on Bluesky"));
+        let threads = call(
+            &session,
+            "schedule_post",
+            json!({ "network": "threads", "markdown": "hi", "scheduledAt": "2030-01-01T09:00:00Z" }),
+        );
+        assert_eq!(threads["result"]["isError"], true);
         let empty = call(
             &session,
             "schedule_post",

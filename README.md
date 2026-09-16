@@ -1,10 +1,38 @@
 # Twister
 
-A desktop client for X (Twitter) with niceties injected. Tauri 2 + Rust +
-React 19, based on the [Windbag](https://github.com/entro314-labs/yapper)
-shell: a native frame — sidebar, titlebar, status bar, vibrancy, menu and
-shortcuts — around x.com itself, running in its own webview with a bridge
-script that quietly fixes the things X gets wrong.
+A desktop client for X (Twitter), Bluesky, Threads and Instagram with
+niceties injected. Tauri 2 + Rust + React 19, based on the
+[Windbag](https://github.com/entro314-labs/yapper) shell: a native frame —
+sidebar, titlebar, status bar, vibrancy, menu and shortcuts — around each
+site itself, running in its own webview with a bridge script that quietly
+fixes the things X gets wrong and watches what every site loads.
+
+## The networks
+
+Each network is treated on its own terms, and the terms are in one file,
+`src-tauri/src/network.rs`, with that network's page scripts under
+`src-tauri/site/<network>/`. Adding one is a variant there, its scripts, and
+a row in the shell's table.
+
+| | X | Bluesky | Threads | Instagram |
+| --- | --- | --- | --- | --- |
+| Tabs, sidebar, shortcuts | yes | yes | yes | yes |
+| The store (people, posts) | yes | yes | yes | yes |
+| Scan a page to its end | yes | yes | yes | yes |
+| Download button | yes | photos, and the HLS playlist for video | yes | yes |
+| Follow, unfollow, delete | yes | yes, lower caps, unverified live | refused | refused |
+| Write: post now, schedule | yes, threads | one post at a time | refused | refused |
+| The niceties and the look | all of them | navigation, font, text size, avatars, smooth scrolling | font, smooth scrolling | font, smooth scrolling |
+
+Threads and Instagram are Meta's web stack — generated class names, no test
+ids, and automation detection that treats a clicked-for-you follow as a reason
+to lock an account — so Twister only *watches* them: it records what the page
+loads, scans, exports and downloads, and refuses to follow, delete or post.
+Their composers are modals Twister cannot open by URL, so the Write panel and
+⌘N say so. Bluesky's web app is a single-page React app with stable test ids,
+so it gets the operations, with caps below X's; the signed-in parts (a follows
+list's buttons, the delete menu, the composer) were written from the app's
+own test ids and have not been exercised live, so keep a first run a dry run.
 
 ## Why a wrapper and not an API client
 
@@ -45,35 +73,44 @@ what each thread would have cost. The numbers live in `src/lib/api-costs.ts`.
 
 ## What it does
 
-- **A native frame.** Sidebar with the six places you actually go, a titlebar
-  with back / forward / reload and the tabs, a status bar that says where
-  on X you are and whether it is still loading. macOS overlay titlebar and
-  vibrancy, Windows Mica, app-drawn window controls off macOS.
-- **Tabs.** Each tab is an X page in its own webview, sharing the session.
-  ⌘T opens one, ⌘W or a middle-click closes it, Ctrl⇥ moves along; popups
-  open as tabs; the open tabs come back on the next launch.
+- **A native frame.** A row of the four networks, then a sidebar with the
+  places the front tab's site has a page for, a titlebar with back / forward /
+  reload and the tabs, a status bar that says which site and where on it you
+  are and whether it is still loading. macOS overlay titlebar and vibrancy,
+  Windows Mica, app-drawn window controls off macOS.
+- **Tabs.** Each tab is one network's page in its own webview; tabs on the
+  same network share its session, and every tab shares one cookie store.
+  ⌘T opens one beside the front tab, ⌘⇧1–⌘⇧4 bring a network forward (its
+  last-used tab, or a new one on its home), ⌘W or a middle-click closes,
+  Ctrl⇥ moves along; popups open as tabs, a link from one network to
+  another opens a tab there; the open tabs come back on the next launch.
 - **Shortcuts that work whichever view has focus.** ⌘1–⌘6 for Home, Explore,
   Notifications, Messages, Bookmarks and Profile; ⌘N new post; ⌘[ ⌘] ⌘R;
   ⌘\ for the sidebar; ⌘⇧P ⌘⇧O ⌘⇧N for the tools; ⌘, for settings. They are
   menu accelerators, which is also why ⌘C and ⌘V work at all on macOS.
-- **The store, and the tools over it.** While Twister watches, everything X
-  loads into a tab — the people on a list, the posts on a timeline, your
-  bookmarks — is read from X's own responses as the page receives them and
-  kept in a local SQLite file. Nothing is fetched on X's behalf; nothing
-  leaves the machine. Three panels open beside the island:
+- **The store, and the tools over it.** While Twister watches, everything a
+  site loads into a tab — the people on a list, the posts on a timeline, your
+  bookmarks — is read from the site's own responses as the page receives
+  them (X's GraphQL, Bluesky's XRPC, Meta's GraphQL and the Relay cache it
+  ships inline) and kept in a local SQLite file, every row marked with its
+  network. Nothing is fetched on a site's behalf; nothing leaves the
+  machine. Three panels open beside the island, each looking at one network
+  at a time:
   - *People* — filter by bio, source, follow-back status and follower counts;
     export CSV, JSON or Markdown; scan a list page to its end; follow or
     unfollow a selection on the page that holds them, one every few seconds,
     dry run by default, stopping at the first thing X refuses.
   - *Posts* — the same for posts, bookmarks included; delete your own in
     bulk through X's own menu, dry run by default.
-  - *Write* — Markdown in, a thread out, with X's weighted count per part;
-    post now through X's composer, or schedule it for while the app is open.
+  - *Write* — Markdown in, a thread out, counted the network's way (X's
+    weighted 280, Bluesky's 300 graphemes); post now through the site's own
+    composer, or schedule it for while the app is open and signed in there.
 - **Downloads.** A button in each post's action bar saves its photos at full
   size or its video at the best bitrate to Downloads/Twister.
 - **The agent door.** `twister-mcp` is an MCP server over the same store:
   `claude mcp add twister -- /path/to/twister-mcp`. Search, export, queue a
-  scan or a follow run the app performs next, schedule posts.
+  scan or a follow run the app performs next, schedule posts — each on a
+  named network, X when none is given.
 - **The niceties**, each a switch in Settings:
   - *Following first* — opens the home timeline on Following, once per visit.
   - *Hide promoted posts.*
@@ -139,35 +176,41 @@ private API.
 
 ## The one honest caveat
 
-Every nicety is a selector on X's own DOM, which X changes without notice. When
-one stops matching, that nicety silently does nothing — never breaks the page —
-and can be switched off in Settings until the next release. All of the
-selectors live in two files, `src-tauri/site/niceties.css` and
-`src-tauri/site/bridge.js`, so a fix is a one-file change. "Following first"
-finds the tab by its English label.
+Every nicety is a selector on a site's own DOM, which the site changes without
+notice. When one stops matching, that nicety silently does nothing — never
+breaks the page — and can be switched off in Settings until the next release.
+Each network's selectors live in its own folder under `src-tauri/site/`, so a
+fix is a one-file change. "Following first" finds X's tab by its English
+label.
 
-Sign-in works with X's own form. "Continue with Google" and "Continue with
-Apple" open as popups on the web, which a single-view client cannot host; they
-are loaded in place instead and may not complete. Use the password form.
+Sign-in works with each site's own form. X's "Continue with Google" and
+"Continue with Apple" open as popups on the web, which a single-view client
+cannot host; they are loaded in place instead and may not complete. Use the
+password form. Whether Meta's sign-in completes inside an embedded webview at
+all is unverified; Instagram is known to challenge unfamiliar browsers.
+Signing out clears the one cookie store the tabs share, so it signs out of
+every network at once.
 
 ## How it is built
 
 One window, child webviews. The **shell** is this app's React page and owns
-the frame. Each **tab** is x.com in a webview of its own, added after the
-shell so it sits above it, positioned by Rust from insets the shell measures —
-so it follows the sidebar collapsing, a tool panel opening and every window
-resize with no round trip. Only the front tab is shown. Anything the shell
-needs to show over the island (Settings) hides the site first.
+the frame. Each **tab** is one network's site in a webview of its own, added
+after the shell so it sits above it, positioned by Rust from insets the shell
+measures — so it follows the sidebar collapsing, a tool panel opening and
+every window resize with no round trip. Only the front tab is shown. Anything
+the shell needs to show over the island (Settings) hides the site first.
 
-Three scripts run at document start in every tab: the bridge (niceties,
-navigation, the handle, a layout measurement), the capture hook (X's own API
-responses, read as they arrive, batched to the store) and the operations
-(scan, follow, unfollow, delete, compose — all clicking what X drew and
+Four scripts run at document start in every tab: the shared plumbing
+(`common.js`: the fetch/XHR hook, the batcher, the download button, the
+operations runner), then the network's own bridge (niceties, navigation, the
+handle), capture hook (the site's own API responses, read as they arrive,
+batched to the store) and operations (scan, and where the network allows
+them follow, unfollow, delete, compose — all clicking what the site drew and
 reporting progress). Together they may call seven commands, granted by a
-capability scoped to x.com's origin and nothing else, and each validates its
-input, because anything on that page could call it too. Operations run one at
-a time, in the front tab, and every destructive one is a dry run unless told
-otherwise.
+capability scoped to the four sites' origins and nothing else, and each
+validates its input against the calling tab's network, because anything on
+that page could call it too. Operations run one at a time, in a tab of the
+job's network, and every destructive one is a dry run unless told otherwise.
 
 ```
 src/                    React 19 + TanStack Router + Tailwind 4
@@ -177,15 +220,18 @@ src/                    React 19 + TanStack Router + Tailwind 4
   lib/tauri/            the IPC contract: command registry, client, types
   lib/query/            TanStack Query hooks and the Rust event bridge
   lib/site-island.ts    keeps the site webview glued to the island
-  routes/               the island (x.com), settings, tools/{people,posts,compose}
+  lib/networks.ts       what the shell knows about each network
+  routes/               the island, settings, tools/{people,posts,compose}
 src-tauri/src/
   lib.rs                the window, the webviews, window events
+  network.rs            the networks: hosts, handles, ids, destinations, limits,
+                        what each one allows
   site.rs               the tabs: allowlist, title parsing, sections, layout,
                         the bridge's commands
   db.rs                 the store: people, posts, jobs, scheduled posts (SQLite)
   capture.rs            what the page sends the store, and its checks
-  ops.rs                operations: one at a time, in the front tab
-  compose.rs            Markdown to X-shaped text, the weighted count, the split
+  ops.rs                operations: one at a time, in a tab of the job's network
+  compose.rs            Markdown to post-shaped text, each network's count, the split
   scheduler.rs          due posts and queued jobs, every twenty seconds
   download.rs           media to Downloads/Twister
   export.rs             CSV, JSON and Markdown writers
@@ -194,10 +240,13 @@ src-tauri/src/
   settings.rs           preferences, window placement and open tabs as JSON
   commands.rs           every Tauri command
 src-tauri/site/
-  bridge.js             niceties, navigation, the handle, layout
-  capture.js            the fetch/XHR hook and the download button
-  ops.js                scan, follow, unfollow, delete, compose
-  niceties.css          the selectors, gated on attributes the bridge stamps
+  common.js             the fetch/XHR hook, the batcher, the download button,
+                        the operations runner
+  x/                    bridge.js (niceties, navigation, the handle, layout),
+                        capture.js, ops.js, niceties.css
+  bluesky/              the same four for bsky.app
+  threads/, instagram/  bridge.js, ops.js (scan only), niceties.css
+  meta/capture.js       the capture hook Threads and Instagram share
 src-tauri/capabilities/ what each webview may call
 ```
 
@@ -236,8 +285,8 @@ export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
 
 Twister stores three small JSON files in your app data directory — preferences,
 window placement, open tabs — and one SQLite file, the store: the people and
-posts X loaded into your tabs, kept only when *Remember what X loads* is on and
-cleared from Settings. Your X session is a cookie in the site view's own store,
+posts the sites loaded into your tabs, kept only when *Remember what X loads*
+is on and cleared from Settings. Your sessions are cookies in the site views' own store,
 which Twister never reads. Sign out in Settings clears that store. The shell's
 content-security policy allows no outbound connections; the only thing that
 talks to X is X. The one call Twister itself makes is the update check — to

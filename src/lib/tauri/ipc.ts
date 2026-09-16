@@ -8,6 +8,7 @@ export const IPC_COMMANDS = {
   updateSettings: 'update_settings',
   getSiteState: 'get_site_state',
   navigateSite: 'navigate_site',
+  switchNetwork: 'switch_network',
   siteAction: 'site_action',
   setSiteInsets: 'set_site_insets',
   setSiteVisible: 'set_site_visible',

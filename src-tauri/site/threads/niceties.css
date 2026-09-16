@@ -1,0 +1,39 @@
+/*
+ * The niceties on threads.com. Meta's page has generated class names and no
+ * test ids, so nothing here reaches into its layout: the font and smooth
+ * scrolling, gated on attributes the bridge stamps on <html>, and the
+ * download button's own look.
+ */
+
+html[data-twister-smooth] {
+  scroll-behavior: smooth !important;
+}
+
+html[data-twister-font] body,
+html[data-twister-font] body * {
+  font-family: var(--twister-font), "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif !important;
+}
+
+[data-twister-download] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-left: 4px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: rgb(153, 153, 153);
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+[data-twister-download] svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+[data-twister-download]:hover {
+  background-color: rgba(153, 153, 153, 0.15);
+  color: currentColor;
+}
