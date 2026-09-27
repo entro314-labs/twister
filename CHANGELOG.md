@@ -101,6 +101,10 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **An update that failed to install on quit said nothing.** You relaunched
+  into the old version with no word of it. The next launch now says so in
+  the status bar and in Settings, with the reason, until an update is
+  downloaded or installed again.
 - **A Bluesky post of long emoji could pass the count and still be too
   big.** Bluesky caps a post at 3000 bytes as well as 300 graphemes; the
   Write panel now splits at whichever comes first, and posting refuses a

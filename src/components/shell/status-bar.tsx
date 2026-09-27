@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router'
 import * as React from 'react'
 
 import { NETWORKS } from '@/lib/networks'
@@ -90,6 +91,18 @@ export function StatusBar() {
             {restart.isPending ? 'Restarting…' : 'Restart'}
           </button>
         </span>
+      ) : null}
+
+      {/* The quit that was meant to install it failed; the app says so once it is back. */}
+      {!update.data?.staged && update.data?.failedInstall ? (
+        <Link
+          to="/settings"
+          title={update.data.failedInstall}
+          className="flex shrink-0 items-center gap-1.5 rounded-sm px-1 text-destructive hover:bg-destructive/10"
+        >
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-destructive" />
+          Update did not install
+        </Link>
       ) : null}
 
       {running ? (

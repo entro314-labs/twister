@@ -162,6 +162,7 @@ pub fn update_state(app: AppHandle) -> UpdateState {
         version: app.package_info().version.to_string(),
         support: update::install_support(),
         staged: update::staged(&app),
+        failed_install: update::failed_install(),
     }
 }
 
@@ -173,6 +174,9 @@ pub struct UpdateState {
     pub version: String,
     pub support: update::InstallSupport,
     pub staged: bool,
+    /// Why the update staged last session did not install on quit, until
+    /// one is staged or installed again.
+    pub failed_install: Option<String>,
 }
 
 /// Is a newer build published on the channel this install polls?

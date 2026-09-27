@@ -61,6 +61,8 @@ export interface UpdateState {
   support: 'supported' | 'packageManager'
   /** Whether a verified bundle is already waiting for the next quit. */
   staged: boolean
+  /** Why the update staged last session did not install on quit, if it did not. */
+  failedInstall: string | null
 }
 
 /** `update::UpdateMeta` — a newer build, as its channel manifest describes it. */

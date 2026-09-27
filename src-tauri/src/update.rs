@@ -29,6 +29,33 @@ use tauri_plugin_updater::UpdaterExt;
 
 use crate::error::{AppError, Result};
 
+/// Where a quit-time install that failed leaves word for the next launch: the
+/// app is exiting when it fails, so there is nobody to tell until then.
+const FAILED_INSTALL_FILE: &str = "update-install-failed.txt";
+
+fn failed_install_path() -> Option<std::path::PathBuf> {
+    crate::settings::data_dir()
+        .ok()
+        .map(|dir| dir.join(FAILED_INSTALL_FILE))
+}
+
+/// What the last quit-time install said when it failed, until an update is
+/// staged or installed again.
+pub fn failed_install() -> Option<String> {
+    let text = std::fs::read_to_string(failed_install_path()?).ok()?;
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+fn clear_failed_install() {
+    if let Some(path) = failed_install_path()
+        && let Err(err) = std::fs::remove_file(&path)
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        log::warn!("could not clear {}: {err}", path.display());
+    }
+}
+
 /// A downloaded-and-verified update waiting for exit to install.
 #[derive(Default)]
 pub struct PendingUpdate(pub Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>);
@@ -373,6 +400,7 @@ pub async fn stage_update(app: tauri::AppHandle, channel: Channel) -> Result<Upd
         .0
         .lock()
         .map_err(|_| AppError::Internal("A lock was poisoned.".into()))? = Some((update, bytes));
+    clear_failed_install();
     Ok(meta)
 }
 
@@ -395,6 +423,7 @@ pub fn restart_and_install(app: &tauri::AppHandle) -> Result<()> {
         .map_err(|err| crate::error::internal("Installing the update", err))?;
     *guard = None;
     drop(guard);
+    clear_failed_install();
     log::info!("staged update installed; restarting into the new version");
     app.restart();
 }
@@ -419,7 +448,17 @@ pub fn install_pending_on_exit(app: &tauri::AppHandle) {
     };
     if let Err(err) = update.install(&bytes) {
         log::error!("the staged update failed to install on exit: {err}");
+        // Said on the next launch, in the status bar and in Settings.
+        if let Some(path) = failed_install_path()
+            && let Err(write) = std::fs::write(
+                &path,
+                format!("Version {} did not install: {err}", update.version),
+            )
+        {
+            log::error!("could not record the failed install: {write}");
+        }
     } else {
+        clear_failed_install();
         log::info!("staged update installed; the next launch runs the new version");
     }
 }

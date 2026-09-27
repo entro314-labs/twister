@@ -859,6 +859,16 @@ function UpdatesSection({
         </div>
       ) : null}
 
+      {state.data?.failedInstall && !staged ? (
+        <div role="alert" className="px-3 py-2.5 text-xs leading-relaxed text-destructive">
+          <span className="block font-medium">The last update did not install</span>
+          <span className="block">{state.data.failedInstall}</span>
+          <span className="block text-muted-foreground">
+            Twister is still on {state.data.version}. Check again to download it afresh.
+          </span>
+        </div>
+      ) : null}
+
       {found?.notes && !staged ? (
         <p className="max-h-48 overflow-y-auto px-3 py-2.5 text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
           {found.notes}
