@@ -53,16 +53,20 @@ env_logger = "0.11"
 rusqlite = { version = "0.40", features = ["bundled"] }
 # Scheduling is civil-time arithmetic, and post dates come back as RFC 3339.
 chrono = { version = "0.4", features = ["serde"] }
-# Media downloads only: public twimg URLs, no cookies, no X API. The webview
-# is the only thing that ever talks to X signed in.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
+# Media downloads and the update probes only: public CDN and releases URLs,
+# no cookies, no network's API. The webview is the only thing that ever talks
+# to a site signed in. The same 0.13 the updater uses, so one HTTP stack is
+# compiled; `rustls-no-provider` because the provider is ring, installed once
+# at startup (`lib.rs`) — the one the updater already links.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "blocking"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # X bills the 280 against graphemes after URL weighting.
 unicode-segmentation = "1"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 # Vibrancy behind the transparent window. Taken direct rather than through
-# tauri's `set_effects`: tauri 2.11 links window-vibrancy 0.6, which predates
-# the newer materials and lacks the `clear_*` half a live toggle needs.
+# tauri's `set_effects`, which discards what the OS answered — and
+# `windowing::apply_material` reports the material actually applied.
 window-vibrancy = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]

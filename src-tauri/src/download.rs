@@ -275,6 +275,18 @@ mod tests {
     use crate::db::Media;
 
     #[test]
+    fn a_client_builds_with_the_provider_the_app_installs() {
+        // What `lib.rs` does at startup; without it reqwest panics here.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        assert!(
+            reqwest::blocking::Client::builder()
+                .user_agent("Twister")
+                .build()
+                .is_ok()
+        );
+    }
+
+    #[test]
     fn image_urls_are_upgraded_to_the_original() {
         assert_eq!(
             original_image("https://pbs.twimg.com/media/abc?format=jpg&name=small").expect("ok"),

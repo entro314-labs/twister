@@ -63,6 +63,11 @@ pub fn run() {
     ))
     .init();
 
+    // reqwest is built without a TLS crypto provider of its own; ring is the
+    // one the updater links. An `Err` only says one is installed already,
+    // which is all a client needs.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
