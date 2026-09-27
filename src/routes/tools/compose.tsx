@@ -2,7 +2,7 @@ import { IconCalendarClock, IconSend, IconTrash } from '@tabler/icons-react'
 import { createFileRoute } from '@tanstack/react-router'
 import * as React from 'react'
 
-import { ErrorLine, Field, Panel, Section, useRun } from '@/components/tools/panel'
+import { ErrorLine, Field, ListState, Panel, Section, useRun } from '@/components/tools/panel'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
 import { partCost, usd } from '@/lib/api-costs'
@@ -241,9 +241,14 @@ function ComposeScreen() {
       <Section title="Scheduled">
         <div className="divide-y divide-border/50 rounded-lg border border-border/60 bg-card/60">
           {(scheduled.data ?? []).length === 0 ? (
-            <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-              Nothing scheduled.
-            </p>
+            <ListState
+              query={scheduled}
+              empty={
+                <p className="px-3 py-4 text-center text-xs text-muted-foreground">
+                  Nothing scheduled.
+                </p>
+              }
+            />
           ) : (
             (scheduled.data ?? []).map((post) => (
               <div key={post.id} className="flex items-start gap-2 px-3 py-2 text-xs">

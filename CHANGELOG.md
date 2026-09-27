@@ -101,6 +101,9 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **A list that failed to load said "Nothing captured".** People, Posts and
+  the schedule now say when they are still reading, and say why when the
+  store could not be read, instead of looking empty.
 - **Posts scheduled through `twister-mcp` did not show in the Write panel**
   until something else refreshed it. The app now notices within a tick.
 - **An update that failed to install on quit said nothing.** You relaunched

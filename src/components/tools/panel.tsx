@@ -59,6 +59,34 @@ export function ErrorLine({ message }: { message: string | null }) {
   )
 }
 
+/**
+ * What a list shows when it has no rows to show: why. A read that failed or is still on its way is
+ * not "nothing captured".
+ */
+export function ListState({
+  query,
+  empty,
+}: {
+  query: { isPending: boolean; error: unknown }
+  empty: React.JSX.Element
+}): React.JSX.Element {
+  if (query.error) {
+    return (
+      <p className="px-3 py-4 text-center text-xs text-destructive" role="alert">
+        Could not read the store: {humanMessage(query.error)}
+      </p>
+    )
+  }
+  if (query.isPending) {
+    return (
+      <p className="px-3 py-4 text-center text-xs text-muted-foreground" role="status">
+        Reading…
+      </p>
+    )
+  }
+  return empty
+}
+
 /** Runs a mutation and keeps its failure as a line of text. */
 export function useRun() {
   const [error, setError] = React.useState<string | null>(null)

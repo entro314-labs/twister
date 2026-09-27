@@ -7,6 +7,7 @@ import {
   ErrorLine,
   ExportControls,
   Field,
+  ListState,
   Panel,
   Section,
   compact,
@@ -248,10 +249,15 @@ function PeopleScreen() {
         </label>
         <div className="divide-y divide-border/50 rounded-lg border border-border/60 bg-card/60">
           {rows.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 px-4 py-8 text-center text-xs text-muted-foreground">
-              <IconUsers className="size-5" />
-              Nothing captured with these filters yet.
-            </div>
+            <ListState
+              query={people}
+              empty={
+                <div className="flex flex-col items-center gap-2 px-4 py-8 text-center text-xs text-muted-foreground">
+                  <IconUsers className="size-5" />
+                  Nothing captured with these filters yet.
+                </div>
+              }
+            />
           ) : (
             rows.map((person) => (
               <PersonRow
