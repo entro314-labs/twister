@@ -434,10 +434,16 @@ pub fn open_tab(app: &AppHandle, window: &Window, url: &str, activate: bool) -> 
 
     // The user's own scripts and styles, read fresh on every build: a reload
     // from Settings is a rebuild, and this is where it picks the changes up.
-    let assets = userland::load().unwrap_or_else(|err| {
-        log::warn!("user scripts and styles unavailable: {err}");
+    // They are X's, as the folders promise — never Meta's pages, where a
+    // script clicking for the user is what locks accounts.
+    let assets = if network == Network::X {
+        userland::load().unwrap_or_else(|err| {
+            log::warn!("user scripts and styles unavailable: {err}");
+            userland::Loaded::default()
+        })
+    } else {
         userland::Loaded::default()
-    });
+    };
     let current_prefs = prefs(app);
 
     let nav_handle = app.clone();
@@ -451,7 +457,8 @@ pub fn open_tab(app: &AppHandle, window: &Window, url: &str, activate: bool) -> 
         .initialization_script(scripts(network).capture)
         .initialization_script(scripts(network).ops);
     for (name, source) in &assets.scripts {
-        builder = builder.initialization_script(userland::wrap_script(name, source));
+        builder =
+            builder.initialization_script(userland::wrap_script(name, source, network.tab_hosts()));
     }
     let builder = builder
         .devtools(cfg!(debug_assertions))

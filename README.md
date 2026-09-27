@@ -153,7 +153,8 @@ what each thread would have cost. The numbers live in `src/lib/api-costs.ts`.
     colour and shadowing it, so it needs no class names of X's.
   - *Unread count on the Dock icon*, mirrored from the page title.
 - **Your own scripts and styles.** Two folders in the app data directory,
-  `scripts/` and `styles/`. Every `*.js` runs on every X page once the DOM is
+  `scripts/` and `styles/`. Every `*.js` runs on every X page — X's alone,
+  not the other networks' tabs or a sign-in provider's page — once the DOM is
   ready, the way a Tampermonkey script does (minus the `GM_*` API); every
   `*.css` is applied at document start. Injected as initialization scripts,
   which X's content-security policy cannot block. Settings lists what is in

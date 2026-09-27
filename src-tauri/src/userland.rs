@@ -1,9 +1,10 @@
 //! User scripts and styles: the Tampermonkey and Stylus of this client.
 //!
 //! Two folders in the app data directory, `scripts/` and `styles/`. Every
-//! `*.js` in the first runs on every x.com page once the DOM is ready, the way
+//! `*.js` in the first runs on every X page once the DOM is ready, the way
 //! a userscript with `@run-at document-idle` would; every `*.css` in the second
-//! is applied at document start. Injected as initialization scripts, which the
+//! is applied at document start. X's own pages only: not the other networks'
+//! tabs, and not a sign-in provider's page an X tab passes through. Injected as initialization scripts, which the
 //! page's content-security policy cannot block — so a script that works in
 //! Tampermonkey works here, minus the `GM_*` API.
 //!
@@ -104,13 +105,15 @@ fn read_all(folder: &Path, extension: &str) -> Vec<(String, String)> {
     files
 }
 
-/// Wraps one user script so it runs once the DOM is ready and a throw inside
-/// it lands in the console with the file's name rather than killing the
-/// bridge or the next script.
-pub fn wrap_script(name: &str, source: &str) -> String {
+/// Wraps one user script so it runs once the DOM is ready, only on `hosts`
+/// — a tab also passes through sign-in providers' pages, and the user's code
+/// is not for those — and so a throw inside it lands in the console with the
+/// file's name rather than killing the bridge or the next script.
+pub fn wrap_script(name: &str, source: &str, hosts: &[&str]) -> String {
     let label = serde_json::to_string(name).unwrap_or_else(|_| "\"script\"".into());
+    let hosts = serde_json::to_string(hosts).unwrap_or_else(|_| "[]".into());
     format!(
-        "(function(){{\n  var run = function(){{\n    try {{\n{source}\n    }} catch (err) {{ console.error('[twister] user script ' + {label} + ' failed:', err); }}\n  }};\n  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, {{ once: true }});\n  else run();\n}})();"
+        "(function(){{\n  if ({hosts}.indexOf(location.hostname) < 0) return;\n  var run = function(){{\n    try {{\n{source}\n    }} catch (err) {{ console.error('[twister] user script ' + {label} + ' failed:', err); }}\n  }};\n  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, {{ once: true }});\n  else run();\n}})();"
     )
 }
 
@@ -152,8 +155,9 @@ mod tests {
 
     #[test]
     fn wrapped_scripts_carry_their_name_and_wait_for_the_dom() {
-        let wrapped = wrap_script("hello.js", "console.log(1)");
+        let wrapped = wrap_script("hello.js", "console.log(1)", &["x.com", "twitter.com"]);
         assert!(wrapped.contains("\"hello.js\""));
+        assert!(wrapped.contains("[\"x.com\",\"twitter.com\"].indexOf(location.hostname) < 0"));
         assert!(wrapped.contains("DOMContentLoaded"));
         assert!(wrapped.contains("console.log(1)"));
     }

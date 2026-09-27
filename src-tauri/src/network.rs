@@ -83,7 +83,7 @@ impl Network {
     }
 
     /// Exact hosts a tab may open on. The first is the canonical one.
-    fn tab_hosts(self) -> &'static [&'static str] {
+    pub fn tab_hosts(self) -> &'static [&'static str] {
         match self {
             Self::X => &["x.com", "twitter.com", "www.x.com"],
             Self::Bluesky => &["bsky.app"],

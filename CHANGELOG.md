@@ -101,6 +101,12 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **Your own scripts and styles ran on every network, and on sign-in
+  pages.** The folders are for X, as Settings says, but they were injected
+  into Bluesky, Threads and Instagram tabs too — where a script clicking for
+  you is what gets Meta accounts locked — and a script also ran on the
+  Google or Apple sign-in page an X tab passed through. They now run on X's
+  own pages only.
 - **One unknown value in `settings.json` made every later save fail.** A
   hand edit, or a value only a newer build knows, loaded as it was and then
   failed the check on every change. Such a value now loads as its default,
