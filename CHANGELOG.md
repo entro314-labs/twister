@@ -101,6 +101,10 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **One unknown value in `settings.json` made every later save fail.** A
+  hand edit, or a value only a newer build knows, loaded as it was and then
+  failed the check on every change. Such a value now loads as its default,
+  with the rest of the file kept.
 - **Bookmarks were X's alone, and not only bookmarks.** A bookmark was a
   post first seen on X's `Bookmarks` page, so Bluesky's and Meta's saved
   posts never counted, the export from `twister-mcp` came back empty there,

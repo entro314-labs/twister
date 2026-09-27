@@ -69,42 +69,92 @@ impl Settings {
     }
 }
 
+const THEMES: &[&str] = &["system", "light", "dark"];
+const MATERIALS: &[&str] = &["off", "standard", "strong"];
+const TEXT_SIZES: &[&str] = &["small", "normal", "large"];
+const CHANNELS: &[&str] = &["auto", "stable", "beta", "alpha"];
+
+/// The font goes into a stylesheet verbatim; a family name has no business
+/// carrying anything that could close the declaration.
+fn font_ok(font: &str) -> bool {
+    font.len() <= 120 && !font.contains([';', '{', '}', '<', '>', '\\', '/'])
+}
+
 impl Settings {
     /// Rejects values the renderer could only produce by being wrong.
     pub fn validate(&self) -> Result<()> {
-        if !matches!(self.theme.as_str(), "system" | "light" | "dark") {
+        if !THEMES.contains(&self.theme.as_str()) {
             return Err(AppError::InvalidInput(format!(
                 "Unknown theme `{}`.",
                 self.theme
             )));
         }
-        if !matches!(self.window_material.as_str(), "off" | "standard" | "strong") {
+        if !MATERIALS.contains(&self.window_material.as_str()) {
             return Err(AppError::InvalidInput(format!(
                 "Unknown window material `{}`.",
                 self.window_material
             )));
         }
-        // The font goes into a stylesheet verbatim; a family name has no
-        // business carrying anything that could close the declaration.
-        if self.font.len() > 120 || self.font.contains([';', '{', '}', '<', '>', '\\', '/']) {
+        if !font_ok(&self.font) {
             return Err(AppError::InvalidInput("That is not a font family.".into()));
         }
-        if !matches!(self.text_size.as_str(), "small" | "normal" | "large") {
+        if !TEXT_SIZES.contains(&self.text_size.as_str()) {
             return Err(AppError::InvalidInput(format!(
                 "Unknown text size `{}`.",
                 self.text_size
             )));
         }
-        if !matches!(
-            self.update_channel.as_str(),
-            "auto" | "stable" | "beta" | "alpha"
-        ) {
+        if !CHANNELS.contains(&self.update_channel.as_str()) {
             return Err(AppError::InvalidInput(format!(
                 "Unknown update channel `{}`.",
                 self.update_channel
             )));
         }
         Ok(())
+    }
+
+    /// The same file with every value `validate` would refuse put back to its
+    /// default — a hand edit, or a value only a newer build knows. Loaded as
+    /// it was, one such value would make every later save fail.
+    fn repaired(mut self) -> Self {
+        let defaults = Self::default();
+        let fix = |ok: bool, field: &str, value: &mut String, default: String| {
+            if !ok {
+                log::warn!("settings: `{value}` is not a {field}; using `{default}`");
+                *value = default;
+            }
+        };
+        fix(
+            THEMES.contains(&self.theme.as_str()),
+            "theme",
+            &mut self.theme,
+            defaults.theme,
+        );
+        fix(
+            MATERIALS.contains(&self.window_material.as_str()),
+            "window material",
+            &mut self.window_material,
+            defaults.window_material,
+        );
+        fix(
+            font_ok(&self.font),
+            "font family",
+            &mut self.font,
+            defaults.font,
+        );
+        fix(
+            TEXT_SIZES.contains(&self.text_size.as_str()),
+            "text size",
+            &mut self.text_size,
+            defaults.text_size,
+        );
+        fix(
+            CHANNELS.contains(&self.update_channel.as_str()),
+            "update channel",
+            &mut self.update_channel,
+            defaults.update_channel,
+        );
+        self
     }
 }
 
@@ -246,7 +296,7 @@ impl Store {
     /// Lenient on purpose: a missing or unreadable file is the defaults, with
     /// the reason logged. Refusing to start over a preference is never right.
     pub fn load_settings(&self) -> Settings {
-        load_or_default(&self.dir.join("settings.json"))
+        load_or_default::<Settings>(&self.dir.join("settings.json")).repaired()
     }
 
     pub fn save_settings(&self, settings: &Settings) -> Result<()> {
@@ -296,6 +346,26 @@ fn write_atomic<T: Serialize>(path: &Path, value: &T) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_value_this_build_does_not_know_loads_as_its_default() {
+        let dir = scratch("repair");
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{ "theme": "sepia", "textSize": "large", "font": "a;b", "windowMaterial": "glass" }"#,
+        )
+        .expect("writes");
+        let loaded = Store::open_at(&dir).load_settings();
+        assert_eq!(loaded.theme, "system");
+        assert_eq!(loaded.window_material, "standard");
+        assert_eq!(loaded.font, "");
+        // What was valid stays.
+        assert_eq!(loaded.text_size, "large");
+        // And the next save goes through.
+        assert!(loaded.validate().is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("twister-test-{name}-{}", std::process::id()));
