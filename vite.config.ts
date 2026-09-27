@@ -28,7 +28,12 @@ export default defineConfig({
   // Pre-bundle every Tauri module the app touches: a mid-session re-optimize forces
   // a full-page reload, which in a desktop window is a visible flash.
   optimizeDeps: {
-    include: ['@tauri-apps/api/core', '@tauri-apps/api/event', '@tauri-apps/plugin-opener'],
+    include: [
+      '@tauri-apps/api/app',
+      '@tauri-apps/api/core',
+      '@tauri-apps/api/event',
+      '@tauri-apps/api/window',
+    ],
   },
   build: {
     // Tauri's real floor is the platform webview: evergreen WebView2 on Windows

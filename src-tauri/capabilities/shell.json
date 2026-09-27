@@ -14,7 +14,6 @@
     "core:window:allow-is-maximized",
     "core:app:allow-version",
     "core:event:default",
-    "opener:allow-open-url",
     "allow-get-settings",
     "allow-update-settings",
     "allow-get-site-state",
