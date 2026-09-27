@@ -101,6 +101,10 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **Exports stopped at 500 rows without saying so.** The People and Posts
+  panels exported the page of rows they show, and `twister-mcp`'s `export`
+  the default page; 2,000 bookmarks came out as 500. An export is now
+  everything the filter matches (an explicit `limit` still applies).
 - **A post's date could be blanked by a later sighting** that carried none;
   the known date now stands, as it already did for people.
 - **Follower counts and bios were wiped on Bluesky, Threads and Instagram.**

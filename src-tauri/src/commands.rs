@@ -238,6 +238,7 @@ pub fn list_posts(db: State<'_, Db>, filter: PostFilter) -> Result<Vec<Post>> {
 
 /// Returns the path written, or `None` when the dialog was dismissed. Async,
 /// so the blocking dialog runs off the main thread it would otherwise stall.
+/// Everything the filter matches goes out, not the page of it on screen.
 #[tauri::command]
 pub async fn export_people(
     app: AppHandle,
@@ -246,7 +247,10 @@ pub async fn export_people(
     format: String,
 ) -> Result<Option<String>> {
     let format = export::Format::parse(&format)?;
-    let users = db.users(&filter)?;
+    let users = db.users(&UserFilter {
+        limit: Some(crate::db::MAX_ROWS),
+        ..filter
+    })?;
     let contents = export::render_users(&users, format)?;
     export::save(
         &app,
@@ -268,7 +272,10 @@ pub async fn export_posts(
     } else {
         "twister-posts"
     };
-    let posts = db.posts(&filter)?;
+    let posts = db.posts(&PostFilter {
+        limit: Some(crate::db::MAX_ROWS),
+        ..filter
+    })?;
     let contents = export::render_posts(&posts, format)?;
     export::save(&app, &format!("{name}.{}", format.extension()), &contents)
 }

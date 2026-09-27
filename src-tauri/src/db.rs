@@ -27,6 +27,9 @@ const SCHEMA_VERSION: i64 = 2;
 
 pub const DB_FILE: &str = "twister.sqlite3";
 
+/// The most rows one read returns; what an export asks for.
+pub const MAX_ROWS: i64 = 100_000;
+
 /// One person, as the page last showed them. Optional relationship flags are
 /// only present when X included them, which it does when signed in.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -823,7 +826,7 @@ fn scheduled_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledPost> {
 }
 
 fn limit_of(limit: Option<i64>) -> i64 {
-    limit.map_or(500, |l| l.clamp(1, 100_000))
+    limit.map_or(500, |l| l.clamp(1, MAX_ROWS))
 }
 
 /// A LIKE pattern for a substring search, with the pattern characters escaped

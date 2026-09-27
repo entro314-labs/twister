@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use crate::db::{Db, PostFilter, UserFilter};
+use crate::db::{self, Db, PostFilter, UserFilter};
 use crate::error::{AppError, Result};
 use crate::export::{self, Format};
 use crate::network::{self, Network};
@@ -133,13 +133,17 @@ impl Session {
             return Err(AppError::InvalidInput("`path` must be absolute.".into()));
         }
         let filter = args.get("filter").cloned().unwrap_or(json!({}));
+        // An export is everything the filter matches unless it says otherwise.
         let (contents, rows) = match what {
             "people" | "users" => {
-                let users = self.db.users(&serde_json::from_value(filter)?)?;
+                let mut filter: UserFilter = serde_json::from_value(filter)?;
+                filter.limit = filter.limit.or(Some(db::MAX_ROWS));
+                let users = self.db.users(&filter)?;
                 (export::render_users(&users, format)?, users.len())
             }
             "posts" | "bookmarks" => {
                 let mut filter: PostFilter = serde_json::from_value(filter)?;
+                filter.limit = filter.limit.or(Some(db::MAX_ROWS));
                 if what == "bookmarks" {
                     filter.source = Some("Bookmarks".into());
                 }
@@ -442,6 +446,39 @@ mod tests {
             json!({ "network": "myspace", "kind": "scan", "params": {} }),
         );
         assert_eq!(unknown["result"]["isError"], true);
+    }
+
+    #[test]
+    fn an_export_is_everything_the_filter_matches() {
+        let session = session();
+        let posts: Vec<crate::db::Post> = (1..=600)
+            .map(|id| crate::db::Post {
+                id: id.to_string(),
+                author_handle: "alice".into(),
+                text: "hello".into(),
+                ..crate::db::Post::default()
+            })
+            .collect();
+        session.db.record_posts(&posts).expect("records");
+        let path =
+            std::env::temp_dir().join(format!("twister-mcp-export-{}.json", std::process::id()));
+        let all = call(
+            &session,
+            "export",
+            json!({ "what": "posts", "format": "json", "path": path }),
+        );
+        assert!(
+            text_of(&all).contains("Wrote 600 rows"),
+            "{}",
+            text_of(&all)
+        );
+        let some = call(
+            &session,
+            "export",
+            json!({ "what": "posts", "format": "json", "path": path, "filter": { "limit": 10 } }),
+        );
+        assert!(text_of(&some).contains("Wrote 10 rows"));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
