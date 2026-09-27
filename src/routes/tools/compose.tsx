@@ -75,6 +75,15 @@ function ComposeScreen() {
   const [markdown, setMarkdown] = React.useState(readDraft)
   const [debounced, setDebounced] = React.useState(markdown)
   const [when, setWhen] = React.useState(nextQuarter)
+  // The job posting the draft. The draft stays until the site has taken it: a
+  // composer that did not open, or a post the site refused, must not cost the text.
+  const [posting, setPosting] = React.useState<number | null>(null)
+  const settled = posting === null ? undefined : ops.data?.recent.find((job) => job.id === posting)
+  // Adjusted while rendering, the moment the ledger says how it went.
+  if (settled) {
+    if (settled.status === 'done') setMarkdown('')
+    setPosting(null)
+  }
 
   React.useEffect(() => {
     const timer = setTimeout(() => {
@@ -180,8 +189,8 @@ function ComposeScreen() {
             disabled={busy || empty || over || tooMany || !signedIn}
             onClick={() => {
               void run(async () => {
-                await postNow.mutateAsync({ network, markdown })
-                setMarkdown('')
+                const job = await postNow.mutateAsync({ network, markdown })
+                setPosting(job.id)
               })
             }}
           >

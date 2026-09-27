@@ -101,6 +101,9 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **Post now emptied the draft before anything was posted.** A composer that
+  did not open, or a post the site refused, cost the text. The draft now
+  stays until the post has gone out.
 - **The Write panel under-counted Devanagari, Thai and other scripts with
   combining marks for X**, and keycap emoji: X counts code points, not what
   reads as one letter, so a part the preview said fitted could be refused by
