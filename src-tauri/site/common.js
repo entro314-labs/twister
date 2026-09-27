@@ -130,6 +130,8 @@
   // an rkey, a shortcode — for the download button.
   const FLUSH_MS = 400
   const FLUSH_AT = 250
+  // `capture.rs` refuses a call with more than 1000 people or posts.
+  const BATCH_MAX = 500
 
   function createBatcher() {
     const pending = { users: new Map(), posts: new Map(), source: '' }
@@ -137,19 +139,29 @@
     let flushTimer = null
     let captured = 0
 
+    // What the store kept, by its own count: a batch the app refused, or
+    // capture switched off, adds nothing.
+    function send(batch) {
+      return invoke('site_capture', { batch }).then((kept) => {
+        if (typeof kept === 'number' && kept > 0) captured += kept
+      })
+    }
+
     function flush() {
       flushTimer = null
-      if (!pending.users.size && !pending.posts.size) return
-      const batch = {
-        source: pending.source || 'Unknown',
-        users: [...pending.users.values()],
-        posts: [...pending.posts.values()],
-      }
+      if (!pending.users.size && !pending.posts.size) return Promise.resolve()
+      const source = pending.source || 'Unknown'
+      const users = [...pending.users.values()]
+      const posts = [...pending.posts.values()]
       pending.users.clear()
       pending.posts.clear()
-      captured += batch.users.length + batch.posts.length
-      invoke('site_capture', { batch })
-      document.dispatchEvent(new CustomEvent('twister:captured', { detail: captured }))
+      // One response can hold more than the app takes in a call; it goes in
+      // slices the app accepts rather than whole and refused.
+      const sent = []
+      for (let i = 0; i < Math.max(users.length, posts.length); i += BATCH_MAX) {
+        sent.push(send({ source, users: users.slice(i, i + BATCH_MAX), posts: posts.slice(i, i + BATCH_MAX) }))
+      }
+      return Promise.all(sent)
     }
 
     // `found` is { users: Map, posts: Map }; `keyOf(post)` names the page
@@ -422,7 +434,10 @@
         report({ done: seen, message: `Captured ${seen} so far` })
         if (seen >= limit || idle >= IDLE_ROUNDS) break
       }
-      if (capture) capture.flush()
+      if (capture) {
+        await capture.flush()
+        seen = capture.count() - start
+      }
       return { done: seen, message: `Captured ${seen} from ${location.pathname}` }
     }
 

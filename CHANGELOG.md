@@ -101,6 +101,10 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **A scan could count rows the store never kept.** A response holding more
+  than the app takes in one call was refused whole, silently, while the scan
+  counted it as captured — and it counted rows with capture switched off.
+  Large responses now go in slices, and the scan counts what was kept.
 - **An Instagram id sent as a number could be rounded** by the page's JSON
   parser and stored as a second, wrong row. Ids are now read from Meta's
   string forms, and a number too large to be exact is never used.
