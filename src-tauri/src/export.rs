@@ -190,6 +190,12 @@ pub fn posts_markdown(posts: &[Post]) -> String {
     out
 }
 
+/// Text fit for one Markdown table cell: a pipe would end it and a line
+/// break would end the row.
+fn cell(text: &str) -> String {
+    text.replace('|', "\\|").replace(['\r', '\n'], " ")
+}
+
 pub fn users_markdown(users: &[User]) -> String {
     let mut out =
         String::from("| Handle | Name | Followers | Following | Bio |\n|---|---|---:|---:|---|\n");
@@ -198,10 +204,10 @@ pub fn users_markdown(users: &[User]) -> String {
             out,
             "| [@{0}]({5}) | {1} | {2} | {3} | {4} |",
             user.handle,
-            user.name.replace('|', "\\|"),
+            cell(&user.name),
             user.followers.unwrap_or_default(),
             user.following.unwrap_or_default(),
-            user.bio.replace('|', "\\|").replace('\n', " "),
+            cell(&user.bio),
             user.url()
         );
     }
@@ -246,6 +252,19 @@ pub fn save(app: &tauri::AppHandle, suggested: &str, contents: &str) -> Result<O
 mod tests {
     use super::*;
     use crate::db::Media;
+
+    #[test]
+    fn a_markdown_cell_keeps_its_row() {
+        let user = User {
+            handle: "alice".into(),
+            name: "Alice | A.\nSecond line".into(),
+            bio: "one\r\ntwo".into(),
+            ..User::default()
+        };
+        let table = users_markdown(&[user]);
+        assert_eq!(table.lines().count(), 3, "{table}");
+        assert!(table.contains("Alice \\| A. Second line"));
+    }
 
     #[test]
     fn csv_cells_are_quoted_and_formula_neutral() {

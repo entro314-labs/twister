@@ -101,6 +101,7 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **A name with a line break split its row in a Markdown people export.**
 - **A finished export and a cancelled one looked the same.** The status bar
   now says how many rows went to which file.
 - **A list that failed to load said "Nothing captured".** People, Posts and
