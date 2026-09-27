@@ -15,7 +15,7 @@
   "globals": { "React": "readonly", "JSX": "readonly", "NodeJS": "readonly" },
 
   "settings": {
-    "react": { "version": "19.2" },
+    "react": { "version": "19.3" },
     "jsx-a11y": { "polymorphicPropName": "as", "components": {}, "attributes": {} }
   },
 
