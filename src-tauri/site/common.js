@@ -248,8 +248,9 @@
   }
 
   // ── The operations runner ─────────────────────────────────────────────────
-  // Started by Rust (`ops.rs`) in the active tab, which is also the only
-  // thing that reads what it reports. A scan (scroll a list to its end so
+  // Started by Rust (`ops.rs`) in the tab it brought to the front; that tab
+  // is the only one whose reports about the job are heard, wherever the
+  // user goes next. A scan (scroll a list to its end so
   // the capture hook sees all of it) is the same on every site. Follow,
   // unfollow and delete walk the page one viewport at a time — sites unmount
   // cells that leave the viewport, so jumping to the end would skip
@@ -300,6 +301,18 @@
         if (text) return text
       }
       return ''
+    }
+
+    // A tab behind another draws nothing, so its site loads no more as it
+    // scrolls: a walk there would run out early and report part of a page as
+    // all of it. The job waits for its tab to come back to the front.
+    async function waitVisible() {
+      if (!document.hidden) return
+      report({ message: 'Waiting for its tab to come back to the front' })
+      while (document.hidden) {
+        check()
+        await sleep(500)
+      }
     }
 
     async function waitFor(selector, timeout, root) {
@@ -391,11 +404,13 @@
       const limit = Number(params.limit) > 0 ? Number(params.limit) : Infinity
       const capture = window.__twisterCapture
       const start = capture ? capture.count() : 0
+      await waitVisible()
       await waitForContent(`${config.userCell}, ${config.article}`)
       let idle = 0
       let seen = 0
       for (let round = 0; round < MAX_ROUNDS; round += 1) {
         check()
+        await waitVisible()
         const grew = await scrollRound(scrollContainer())
         const now = capture ? capture.count() - start : 0
         if (now > seen) {
@@ -424,9 +439,11 @@
       let failures = 0
       let idle = 0
       report({ total, message: dryRun ? 'Dry run: looking for them on this page' : 'Working through the page' })
+      await waitVisible()
       await waitForContent(config.userCell)
       for (let round = 0; round < MAX_ROUNDS && processed.size < total; round += 1) {
         check()
+        await waitVisible()
         let acted = false
         for (const cell of document.querySelectorAll(config.userCell)) {
           const handle = config.handleOf(cell)
@@ -485,9 +502,11 @@
       let failures = 0
       let idle = 0
       report({ total, message: dryRun ? 'Dry run: looking for them on this page' : 'Working through the page' })
+      await waitVisible()
       await waitForContent(config.article)
       for (let round = 0; round < MAX_ROUNDS && processed.size < total; round += 1) {
         check()
+        await waitVisible()
         let acted = false
         for (const article of document.querySelectorAll(config.article)) {
           const id = config.postOf(article)

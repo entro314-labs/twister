@@ -135,7 +135,9 @@ All notable changes to Twister are documented here. The format follows
   operation and the schedule until a restart; opening a tab, or following a
   link to another network, marked it failed while its script kept clicking
   in the old tab. A job now belongs to the tab it runs in: only that tab
-  reports, Stop goes to it, and only its reload or close ends it.
+  reports, Stop goes to it, and only its reload or close ends it. While its
+  tab is behind another, a scan, follow, unfollow or delete waits for it to
+  come back rather than reporting part of the page as all of it.
 - **Stop was ignored while an operation was still getting to its page**, and
   the job then started anyway. It is now settled on the spot and never starts.
 - **Posting rules lived in the Write panel and the page, not in the app.** A
