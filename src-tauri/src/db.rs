@@ -348,7 +348,9 @@ impl Db {
                  ON CONFLICT(network, id) DO UPDATE SET
                     slug = CASE WHEN excluded.slug = '' THEN posts.slug ELSE excluded.slug END,
                     author_id = excluded.author_id, author_handle = excluded.author_handle,
-                    text = excluded.text, created_at = excluded.created_at, kind = excluded.kind,
+                    text = excluded.text,
+                    created_at = CASE WHEN excluded.created_at = '' THEN posts.created_at ELSE excluded.created_at END,
+                    kind = excluded.kind,
                     lang = excluded.lang, likes = excluded.likes, reposts = excluded.reposts,
                     replies = excluded.replies, views = excluded.views,
                     bookmarked = excluded.bookmarked, media = excluded.media,
@@ -1349,6 +1351,7 @@ mod tests {
             id: "10".into(),
             author_handle: "alice".into(),
             text: "hello".into(),
+            created_at: "2026-01-01T09:00:00Z".into(),
             kind: "post".into(),
             source: "Bookmarks".into(),
             bookmarked: true,
@@ -1363,12 +1366,15 @@ mod tests {
         let again = Post {
             source: "HomeTimeline".into(),
             likes: 3,
+            created_at: String::new(),
             ..post
         };
         db.record_posts(&[again]).expect("records");
         let read = db.posts(&PostFilter::default()).expect("reads");
         assert_eq!(read.len(), 1);
         assert_eq!(read[0].source, "Bookmarks");
+        // The second sighting carried no date; the first one's stands.
+        assert_eq!(read[0].created_at, "2026-01-01T09:00:00Z");
         assert_eq!(read[0].likes, 3);
         assert_eq!(read[0].media.len(), 1);
         assert_eq!(read[0].url(), "https://x.com/alice/status/10");

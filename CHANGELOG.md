@@ -101,6 +101,8 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **A post's date could be blanked by a later sighting** that carried none;
+  the known date now stands, as it already did for people.
 - **Follower counts and bios were wiped on Bluesky, Threads and Instagram.**
   Those sites send a post's author without counts or a bio, and the store
   took the missing counts as zeros — so scrolling someone's feed after
