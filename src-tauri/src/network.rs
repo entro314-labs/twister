@@ -264,6 +264,15 @@ impl Network {
         }
     }
 
+    /// The byte ceiling a post has besides its count: Bluesky's record holds
+    /// 3000 bytes of text, which 300 long emoji can pass.
+    pub fn max_part_bytes(self) -> Option<usize> {
+        match self {
+            Self::Bluesky => Some(3000),
+            Self::X | Self::Threads | Self::Instagram => None,
+        }
+    }
+
     /// How many posts one compose may carry, or `None` where Twister does not
     /// post. Bluesky's composer is driven one post at a time: a thread there
     /// needs its add-post control, which Twister does not click.

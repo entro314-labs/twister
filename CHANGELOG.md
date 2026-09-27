@@ -101,6 +101,10 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **A Bluesky post of long emoji could pass the count and still be too
+  big.** Bluesky caps a post at 3000 bytes as well as 300 graphemes; the
+  Write panel now splits at whichever comes first, and posting refuses a
+  part over either.
 - **A scan could count rows the store never kept.** A response holding more
   than the app takes in one call was refused whole, silently, while the scan
   counted it as captured — and it counted rows with capture switched off.

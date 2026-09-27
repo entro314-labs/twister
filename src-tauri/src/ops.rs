@@ -330,7 +330,7 @@ pub fn validate(network: Network, kind: &str, params: &Value) -> Result<Option<S
             if parts.is_empty()
                 || parts
                     .iter()
-                    .any(|p| p.trim().is_empty() || crate::compose::count(network, p) > limit)
+                    .any(|p| p.trim().is_empty() || !crate::compose::fits(network, p, limit))
             {
                 return Err(AppError::InvalidInput(format!(
                     "Every post needs text and has to fit {}'s {limit}.",
@@ -754,6 +754,10 @@ mod tests {
         let bluesky = Network::Bluesky;
         assert!(validate(bluesky, "compose", &json!({ "parts": ["x".repeat(300)] })).is_ok());
         assert!(validate(bluesky, "compose", &json!({ "parts": ["x".repeat(301)] })).is_err());
+        // 300 graphemes, but past the record's 3000 bytes.
+        let family = "👨‍👩‍👧‍👦".repeat(150);
+        assert!(family.len() > 3000);
+        assert!(validate(bluesky, "compose", &json!({ "parts": [family] })).is_err());
         let thread = validate(bluesky, "compose", &json!({ "parts": ["one", "two"] }))
             .expect_err("a thread is refused");
         assert!(thread.to_string().contains("one post at a time"));

@@ -261,6 +261,12 @@ pub fn render(markdown: &str) -> String {
     out.join("\n")
 }
 
+/// Whether one post fits: its count within `limit`, and within the network's
+/// byte ceiling where it has one.
+pub fn fits(network: Network, text: &str, limit: usize) -> bool {
+    count(network, text) <= limit && network.max_part_bytes().is_none_or(|max| text.len() <= max)
+}
+
 /// Cuts rendered text into parts under the limit, counted the network's way.
 pub fn split(network: Network, rendered: &str, limit: usize) -> Vec<String> {
     let mut parts = Vec::new();
@@ -276,7 +282,7 @@ pub fn split(network: Network, rendered: &str, limit: usize) -> Vec<String> {
             } else {
                 format!("{current}{piece}")
             };
-            if count(network, candidate.trim()) <= limit {
+            if fits(network, candidate.trim(), limit) {
                 current = candidate;
                 continue;
             }
@@ -285,7 +291,7 @@ pub fn split(network: Network, rendered: &str, limit: usize) -> Vec<String> {
             }
             current = piece.trim_start().to_string();
             // A single piece over the limit is cut at words, then hard.
-            while count(network, &current) > limit {
+            while !fits(network, &current, limit) {
                 let cut = cut_point(network, &current, limit);
                 parts.push(current[..cut].trim().to_string());
                 current = current[cut..].trim_start().to_string();
@@ -326,7 +332,7 @@ fn cut_point(network: Network, text: &str, limit: usize) -> usize {
     let mut last_space = None;
     let mut last_ok = 0;
     for (i, grapheme) in text.grapheme_indices(true) {
-        if count(network, &text[..i + grapheme.len()]) > limit {
+        if !fits(network, &text[..i + grapheme.len()], limit) {
             break;
         }
         last_ok = i + grapheme.len();
@@ -407,6 +413,10 @@ mod tests {
         assert_eq!(prepared.network, Network::Bluesky);
         assert!(prepared.parts.len() >= 2);
         assert!(prepared.parts.iter().all(|p| p.count <= 300));
+        // Long emoji pass 3000 bytes well before 300 graphemes.
+        let heavy = prepare(Network::Bluesky, &"👨‍👩‍👧‍👦 ".repeat(200)).expect("ok");
+        assert!(heavy.parts.len() >= 2);
+        assert!(heavy.parts.iter().all(|p| p.text.len() <= 3000));
         assert!(prepare(Network::Threads, "hi").is_err());
         assert!(prepare(Network::Instagram, "hi").is_err());
     }
