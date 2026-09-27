@@ -502,6 +502,8 @@ impl Db {
 
     // ─── Jobs ───────────────────────────────────────────────────────────────
 
+    /// Writes a job down: `queued` for the app to pick up (what the MCP
+    /// binary writes), or `running` for one the app has already admitted.
     pub fn create_job(
         &self,
         network: Network,
@@ -509,12 +511,21 @@ impl Db {
         params_json: &str,
         dry_run: bool,
         origin: &str,
+        status: &str,
     ) -> Result<Job> {
         let conn = self.lock();
         conn.execute(
             "INSERT INTO jobs (network, kind, params, status, dry_run, origin, created_at)
-             VALUES (?6, ?1, ?2, 'queued', ?3, ?4, ?5)",
-            params![kind, params_json, dry_run, origin, now(), network.slug()],
+             VALUES (?6, ?1, ?2, ?7, ?3, ?4, ?5)",
+            params![
+                kind,
+                params_json,
+                dry_run,
+                origin,
+                now(),
+                network.slug(),
+                status
+            ],
         )?;
         let id = conn.last_insert_rowid();
         drop(conn);
@@ -578,9 +589,17 @@ impl Db {
         Ok(())
     }
 
-    /// A job left `running` by a crash or a quit is not running any more.
+    /// A job left `running` by a crash or a quit is not running any more,
+    /// and neither is the scheduled post it was publishing — which may have
+    /// gone out in part, so it is failed with a word to look, not missed.
     pub fn settle_stale_jobs(&self) -> Result<usize> {
         let conn = self.lock();
+        conn.execute(
+            "UPDATE scheduled_posts SET status = 'failed',
+                error = 'Twister quit while this was being posted. Check the site before posting it again.'
+             WHERE status = 'posting'",
+            [],
+        )?;
         Ok(conn.execute(
             "UPDATE jobs SET status = 'failed', message = 'Twister quit while this was running.',
                 finished_at = ?1 WHERE status = 'running'",
@@ -669,20 +688,41 @@ impl Db {
     }
 
     /// Posts whose time passed by more than the grace window while the app
-    /// was not running are marked `missed` rather than sent late.
+    /// was not running are marked `missed` rather than sent late. One being
+    /// posted is not: a long thread can still be going out past the window.
     pub fn mark_missed(&self, before_rfc3339: &str) -> Result<usize> {
         let conn = self.lock();
         Ok(conn.execute(
             "UPDATE scheduled_posts SET status = 'missed',
                 error = 'Twister was not running when this was due.'
-             WHERE status IN ('scheduled', 'posting') AND scheduled_at < ?1",
+             WHERE status = 'scheduled' AND scheduled_at < ?1",
             params![before_rfc3339],
         )?)
     }
 
+    /// Removes a scheduled post — not one being posted right now, whose
+    /// outcome the running job is about to write.
     pub fn delete_scheduled_post(&self, id: i64) -> Result<()> {
         let conn = self.lock();
-        conn.execute("DELETE FROM scheduled_posts WHERE id = ?1", params![id])?;
+        let removed = conn.execute(
+            "DELETE FROM scheduled_posts WHERE id = ?1 AND status != 'posting'",
+            params![id],
+        )?;
+        if removed == 0 {
+            let posting: bool = conn
+                .query_row(
+                    "SELECT status = 'posting' FROM scheduled_posts WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if posting {
+                return Err(AppError::InvalidInput(
+                    "That post is going out right now. Stop the operation first.".into(),
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -1339,7 +1379,7 @@ mod tests {
     fn jobs_are_queued_claimed_and_settled() {
         let db = Db::open_in_memory().expect("db");
         let job = db
-            .create_job(Network::Bluesky, "scan", "{}", true, "mcp")
+            .create_job(Network::Bluesky, "scan", "{}", true, "mcp", "queued")
             .expect("creates");
         assert_eq!(job.status, "queued");
         assert_eq!(job.network, Network::Bluesky);
@@ -1400,5 +1440,32 @@ mod tests {
         );
         db.delete_scheduled_post(later.id).expect("deletes");
         assert_eq!(db.scheduled_posts().expect("lists").len(), 1);
+    }
+
+    #[test]
+    fn a_post_going_out_is_neither_missed_nor_deleted_and_a_quit_fails_it() {
+        let db = Db::open_in_memory().expect("db");
+        let post = db
+            .schedule_post(Network::X, &["one".into()], "2026-01-01T09:00:00Z")
+            .expect("schedules");
+        db.claim_due_post("2026-01-01T09:00:00Z")
+            .expect("claims")
+            .expect("one");
+        // A long thread still going out past the grace window is not missed.
+        assert_eq!(db.mark_missed("2026-01-01T10:00:00Z").expect("marks"), 0);
+        let refused = db
+            .delete_scheduled_post(post.id)
+            .expect_err("it is going out");
+        assert!(refused.to_string().contains("going out right now"));
+        // Deleting what is not there is not an error.
+        db.delete_scheduled_post(post.id + 1)
+            .expect("nothing to delete");
+        // A quit mid-post leaves it failed, with a word to check the site.
+        db.settle_stale_jobs().expect("settles");
+        let settled = db.scheduled_post(post.id).expect("reads").expect("one");
+        assert_eq!(settled.status, "failed");
+        assert!(settled.error.contains("Check the site"));
+        db.delete_scheduled_post(post.id)
+            .expect("deletes once settled");
     }
 }

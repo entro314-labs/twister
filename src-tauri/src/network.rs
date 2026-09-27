@@ -261,6 +261,17 @@ impl Network {
         }
     }
 
+    /// How many posts one compose may carry, or `None` where Twister does not
+    /// post. Bluesky's composer is driven one post at a time: a thread there
+    /// needs its add-post control, which Twister does not click.
+    pub fn max_parts(self) -> Option<usize> {
+        match self {
+            Self::X => Some(25),
+            Self::Bluesky => Some(1),
+            Self::Threads | Self::Instagram => None,
+        }
+    }
+
     /// Which operations run here. Scan is capture with scrolling and is
     /// always fine; the rest click the site's own buttons on the user's
     /// behalf, which Meta's detection treats as a reason to lock an
@@ -652,6 +663,9 @@ mod tests {
         );
         assert!(Network::Bluesky.compose_limit().is_some());
         assert!(Network::Instagram.compose_limit().is_none());
+        assert_eq!(Network::X.max_parts(), Some(25));
+        assert_eq!(Network::Bluesky.max_parts(), Some(1));
+        assert!(Network::Threads.max_parts().is_none());
         assert!(Network::Threads.supports("scan"));
         assert!(!Network::Threads.supports("follow"));
         assert!(Network::Bluesky.supports("delete"));

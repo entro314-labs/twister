@@ -330,21 +330,7 @@ pub fn schedule_post(
     markdown: String,
     scheduled_at: String,
 ) -> Result<ScheduledPost> {
-    let when = chrono::DateTime::parse_from_rfc3339(&scheduled_at)
-        .map_err(|e| AppError::InvalidInput(format!("That is not a time: {e}")))?;
-    if when < chrono::Utc::now() {
-        return Err(AppError::InvalidInput("That time has passed.".into()));
-    }
-    let prepared = compose::prepare(network, &markdown)?;
-    if prepared.parts.is_empty() {
-        return Err(AppError::InvalidInput("Nothing to post.".into()));
-    }
-    let parts: Vec<String> = prepared.parts.into_iter().map(|p| p.text).collect();
-    let post = db.schedule_post(
-        network,
-        &parts,
-        &crate::scheduled_format(when.with_timezone(&chrono::Utc)),
-    )?;
+    let post = scheduler::schedule(&db, network, &markdown, &scheduled_at)?;
     scheduler::changed(&app);
     Ok(post)
 }

@@ -36,6 +36,8 @@ pub struct Prepared {
     pub network: Network,
     pub parts: Vec<Part>,
     pub limit: usize,
+    /// How many parts the network takes in one go; more is refused.
+    pub max_parts: usize,
 }
 
 /// Where a URL starts and ends in a run of text. X links anything that
@@ -327,12 +329,12 @@ fn cut_point(network: Network, text: &str, limit: usize) -> usize {
 /// The thread as `network` would take it, or why it cannot: Meta's
 /// composers are not driven from here.
 pub fn prepare(network: Network, markdown: &str) -> Result<Prepared> {
-    let limit = network.compose_limit().ok_or_else(|| {
-        AppError::InvalidInput(format!(
+    let (Some(limit), Some(max_parts)) = (network.compose_limit(), network.max_parts()) else {
+        return Err(AppError::InvalidInput(format!(
             "Twister does not post to {}. Use its own composer.",
             network.name()
-        ))
-    })?;
+        )));
+    };
     let parts = split(network, &render(markdown), limit)
         .into_iter()
         .map(|text| Part {
@@ -345,6 +347,7 @@ pub fn prepare(network: Network, markdown: &str) -> Result<Prepared> {
         network,
         parts,
         limit,
+        max_parts,
     })
 }
 

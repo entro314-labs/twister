@@ -316,6 +316,8 @@ export interface PreparedPost {
   network: Network
   parts: PostPart[]
   limit: number
+  /** How many parts the network takes in one go; more is refused. */
+  maxParts: number
 }
 
 export type ScheduledStatus = 'scheduled' | 'posting' | 'posted' | 'failed' | 'missed'

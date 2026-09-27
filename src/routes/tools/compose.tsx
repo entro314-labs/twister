@@ -98,7 +98,8 @@ function ComposeScreen() {
   const signedIn = Boolean(handle)
   const empty = parts.length === 0
   // Bluesky posts one at a time through Twister; a thread there is refused.
-  const tooMany = network === 'bluesky' && parts.length > 1
+  const maxParts = prepared.data?.maxParts ?? 1
+  const tooMany = parts.length > maxParts
   // What X's API would bill for this, part by part: a link changes the row.
   const apiCost = parts.reduce((sum, part) => sum + partCost(part.hasLink), 0)
   const linked = parts.filter((part) => part.hasLink).length
@@ -165,8 +166,9 @@ function ComposeScreen() {
         )}
         {tooMany ? (
           <p className="text-[11px] leading-relaxed text-destructive">
-            Twister posts one post at a time on Bluesky; shorten this to a single post or post the
-            thread from Bluesky’s own composer.
+            {maxParts === 1
+              ? `Twister posts one post at a time on ${info.name}; shorten this to a single post or post the thread from ${info.name}’s own composer.`
+              : `A thread on ${info.name} is at most ${maxParts} posts; shorten it or split it in two.`}
           </p>
         ) : null}
       </Section>

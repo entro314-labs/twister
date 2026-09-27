@@ -500,8 +500,8 @@ pub fn open_tab(app: &AppHandle, window: &Window, url: &str, activate: bool) -> 
                 "tab {id} load {}: {url}",
                 if loading { "started" } else { "finished" }
             );
-            if loading && active_id(&load_handle) == Some(id) {
-                ops::page_reloaded(&load_handle);
+            if loading {
+                ops::page_reloaded(&load_handle, id);
             }
             let handle = current_handle(&load_handle, network);
             update_tab(&load_handle, id, |tab| {
@@ -619,6 +619,7 @@ pub fn close_tab(app: &AppHandle, id: u32) -> Result<()> {
         window.hide()?;
         return Ok(());
     }
+    ops::tab_closed(app, id);
     if active_id(app) == Some(id)
         && let Some(next) = neighbour(&ids, id)
     {
@@ -659,6 +660,7 @@ pub fn rebuild(app: &AppHandle) -> Result<()> {
     let window = main_window(app)?;
     let saved = saved_tabs(app);
     for id in tab_ids(app) {
+        ops::tab_closed(app, id);
         if let Some(webview) = app.get_webview(&label_for(id)) {
             webview.close()?;
         }
@@ -724,7 +726,7 @@ fn tab_ids(app: &AppHandle) -> Vec<u32> {
         .unwrap_or_default()
 }
 
-fn active_id(app: &AppHandle) -> Option<u32> {
+pub fn active_id(app: &AppHandle) -> Option<u32> {
     let id = site(app).site.active.load(Ordering::Relaxed);
     (id != 0).then_some(id)
 }
@@ -779,30 +781,35 @@ pub fn page_network_of_label(app: &AppHandle, label: &str) -> Option<Network> {
     )
 }
 
-/// The active tab's webview label, for checking who is calling.
-pub fn active_label(app: &AppHandle) -> Option<String> {
-    active_id(app).map(label_for)
+fn active(app: &AppHandle) -> Result<u32> {
+    active_id(app).ok_or_else(|| AppError::NotFound("No tab is open.".into()))
 }
 
-/// The active tab's webview.
-fn webview(app: &AppHandle) -> Result<Webview> {
-    let id = active_id(app).ok_or_else(|| AppError::NotFound("No tab is open.".into()))?;
+/// A tab's webview.
+fn tab_webview(app: &AppHandle, id: u32) -> Result<Webview> {
     app.get_webview(&label_for(id))
         .ok_or_else(|| AppError::NotFound("The site webview is gone.".into()))
 }
 
-/// What the operations and the scheduler need to know about the front tab.
+/// The active tab's webview.
+fn webview(app: &AppHandle) -> Result<Webview> {
+    tab_webview(app, active(app)?)
+}
+
+/// What an operation needs to know about its tab.
 pub struct Snapshot {
     pub url: String,
     pub loading: bool,
 }
 
-pub fn current_state(app: &AppHandle) -> Option<Snapshot> {
-    let snapshot = site(app).site.snapshot();
-    let tab = snapshot.active_tab()?;
+/// One tab's URL and load state, or `None` once it has closed.
+pub fn tab_snapshot(app: &AppHandle, id: u32) -> Option<Snapshot> {
+    let state = site(app);
+    let tabs = state.site.tabs.lock().ok()?;
+    let tab = tabs.iter().find(|t| t.state.id == id)?;
     Some(Snapshot {
-        url: tab.url.clone(),
-        loading: tab.loading,
+        url: tab.state.url.clone(),
+        loading: tab.state.loading,
     })
 }
 
@@ -810,11 +817,11 @@ pub fn state(app: &AppHandle) -> SiteState {
     site(app).site.snapshot()
 }
 
-/// Runs a script of ours in the active tab. This is how the shell reaches
-/// the bridge (`__twister`) and the operations (`__twisterOps`); every
-/// argument is JSON-encoded by the caller before it goes in.
-pub fn eval(app: &AppHandle, script: &str) -> Result<()> {
-    webview(app)?.eval(script)?;
+/// Runs a script of ours in a tab. This is how the shell reaches the bridge
+/// (`__twister`) and the operations (`__twisterOps`); every argument is
+/// JSON-encoded by the caller before it goes in.
+pub fn eval(app: &AppHandle, id: u32, script: &str) -> Result<()> {
+    tab_webview(app, id)?.eval(script)?;
     Ok(())
 }
 
@@ -891,17 +898,17 @@ fn open_external(app: &AppHandle, url: &Url) {
     }
 }
 
-/// A full load of `url` in the active tab.
-pub fn navigate(app: &AppHandle, url: &str) -> Result<()> {
+/// A full load of `url` in a tab.
+pub fn navigate(app: &AppHandle, id: u32, url: &str) -> Result<()> {
     let parsed = Url::parse(url).map_err(|e| AppError::InvalidInput(format!("Bad URL: {e}")))?;
     let network =
-        active_network(app).ok_or_else(|| AppError::NotFound("No tab is open.".into()))?;
+        tab_network(app, id).ok_or_else(|| AppError::NotFound("That tab is gone.".into()))?;
     if !allows(network, &parsed) {
         return Err(AppError::InvalidInput(format!(
             "{url} is not somewhere the site can go."
         )));
     }
-    webview(app)?.navigate(parsed)?;
+    tab_webview(app, id)?.navigate(parsed)?;
     Ok(())
 }
 
@@ -920,18 +927,20 @@ pub fn go(app: &AppHandle, destination: Destination) -> Result<()> {
     let href = serde_json::to_string(&url)?;
     eval(
         app,
+        active(app)?,
         &format!("(window.__twister && window.__twister.go({path})) || location.assign({href})"),
     )
 }
 
-/// Sends the active tab to a path on its own site through the bridge, in-app.
-pub fn go_path(app: &AppHandle, path: &str) -> Result<()> {
+/// Sends a tab to a path on its own site through the bridge, in-app.
+pub fn go_path(app: &AppHandle, id: u32, path: &str) -> Result<()> {
     if !path.starts_with('/') || path.contains("//") {
         return Err(AppError::InvalidInput("That is not a site path.".into()));
     }
     let json = serde_json::to_string(path)?;
     eval(
         app,
+        id,
         &format!("window.__twister && window.__twister.go({json})"),
     )
 }

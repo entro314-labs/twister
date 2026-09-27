@@ -241,7 +241,7 @@ pub fn handle(app: &AppHandle, event: MenuEvent) {
     if let Err(err) = result {
         // A menu item that cannot act says why in the status bar rather than
         // failing silently — `Profile` before the handle is known, for one.
-        site::notify(app, err.to_string().replace("[INVALID_INPUT] ", ""));
+        site::notify(app, err.message());
     }
 }
 

@@ -101,6 +101,31 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **An operation refused as "still running" ran anyway, later.** The job was
+  written to the ledger as queued before the one-at-a-time check, so the
+  scheduler picked it up as soon as the running one ended — a live unfollow,
+  delete or post the panel had said was refused. A refused job is now never
+  written down.
+- **An operation belonged to whichever tab was in front.** Switching tabs
+  mid-run dropped its reports, leaving it "running" and blocking every other
+  operation and the schedule until a restart; opening a tab, or following a
+  link to another network, marked it failed while its script kept clicking
+  in the old tab. A job now belongs to the tab it runs in: only that tab
+  reports, Stop goes to it, and only its reload or close ends it.
+- **Stop was ignored while an operation was still getting to its page**, and
+  the job then started anyway. It is now settled on the spot and never starts.
+- **Posting rules lived in the Write panel and the page, not in the app.** A
+  Bluesky thread, an over-length part or a time in the past could be
+  scheduled — through `twister-mcp` especially — and failed later with
+  nobody watching. Scheduling and posting now check the network's own count
+  and parts limit (Bluesky: one post; X: 25) up front, in one place for the
+  panel and `twister-mcp`. `queue_job` no longer accepts a post: a queued
+  post had no dry run and went out for real while reported as one.
+- **A scheduled post still going out was marked missed**, a post abandoned by
+  a quit mid-posting said "Twister was not running", and one going out could
+  be deleted from under its job. Only a post that never started is missed
+  now; one left mid-posting is failed with a word to check the site; one
+  going out cannot be removed until it settles.
 - **A store upgrade cut short could lock Twister out of its own file.** Each
   schema step now commits together with the version it leaves behind, so an
   upgrade interrupted half-way resumes instead of failing on its own debris,

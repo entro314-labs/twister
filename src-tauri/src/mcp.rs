@@ -18,7 +18,7 @@ use crate::db::{Db, PostFilter, UserFilter};
 use crate::error::{AppError, Result};
 use crate::export::{self, Format};
 use crate::network::{self, Network};
-use crate::{compose, ops};
+use crate::{ops, scheduler};
 
 const PROTOCOL_VERSION: &str = "2026-07-28";
 
@@ -159,10 +159,17 @@ impl Session {
         let kind = args.get("kind").and_then(Value::as_str).unwrap_or("");
         let params = args.get("params").cloned().unwrap_or(json!({}));
         let dry_run = args.get("dryRun").and_then(Value::as_bool).unwrap_or(true);
+        // Posting is `schedule_post`'s: a queued compose has no dry run, and
+        // the tool's own schema does not offer it.
+        if kind == "compose" {
+            return Err(AppError::InvalidInput(
+                "queue_job does not post. Use schedule_post.".into(),
+            ));
+        }
         ops::validate(network, kind, &params)?;
-        let job = self
-            .db
-            .create_job(network, kind, &params.to_string(), dry_run, "mcp")?;
+        let job =
+            self.db
+                .create_job(network, kind, &params.to_string(), dry_run, "mcp", "queued")?;
         Ok(format!(
             "Queued job {} ({kind} on {}{}). It runs inside the Twister app, which must be open \
              and signed in there; check list_jobs for the outcome.",
@@ -184,18 +191,7 @@ impl Session {
             .ok_or_else(|| {
                 AppError::InvalidInput("`scheduledAt` (RFC 3339) is required.".into())
             })?;
-        let when = chrono::DateTime::parse_from_rfc3339(when)
-            .map_err(|e| AppError::InvalidInput(format!("`scheduledAt` is not RFC 3339: {e}")))?;
-        let prepared = compose::prepare(network, markdown)?;
-        if prepared.parts.is_empty() {
-            return Err(AppError::InvalidInput("Nothing to post.".into()));
-        }
-        let parts: Vec<String> = prepared.parts.into_iter().map(|p| p.text).collect();
-        let post = self.db.schedule_post(
-            network,
-            &parts,
-            &crate::scheduled_format(when.with_timezone(&chrono::Utc)),
-        )?;
+        let post = scheduler::schedule(&self.db, network, markdown, when)?;
         Ok(format!(
             "Scheduled post {} on {} for {} as {} part(s). It goes out only while the Twister \
              app is open and signed in there; more than 15 minutes late and it is marked missed \
@@ -203,7 +199,7 @@ impl Session {
             post.id,
             network.name(),
             post.scheduled_at,
-            parts.len()
+            post.parts.len()
         ))
     }
 }
@@ -303,7 +299,7 @@ fn tools() -> Vec<Value> {
         ),
         tool(
             "schedule_post",
-            "Schedule a post or thread on X or Bluesky. Markdown: **bold**, *italic*, `code`, lists, and --- for a thread break; long text is split at the network's limit (280 weighted on X, 300 graphemes on Bluesky).",
+            "Schedule a post on X or Bluesky, or a thread of up to 25 on X, for a time in the future. Markdown: **bold**, *italic*, `code`, lists, and --- for a thread break; long text is split at the network's limit (280 weighted on X, 300 graphemes on Bluesky). Bluesky takes one post at a time, so text that would split there is refused.",
             json!({
                 "type": "object",
                 "properties": {
@@ -403,6 +399,20 @@ mod tests {
             json!({ "kind": "unfollow", "params": { "handles": ["a"], "page": "/me/following" } }),
         );
         assert!(text_of(&ok).contains("dry run"));
+        // Posting is schedule_post's; a queued post would go out for real.
+        let post = call(
+            &session,
+            "queue_job",
+            json!({ "kind": "compose", "params": { "parts": ["hi"] } }),
+        );
+        assert_eq!(post["result"]["isError"], true);
+        let too_late = call(
+            &session,
+            "schedule_post",
+            json!({ "markdown": "hi", "scheduledAt": "2020-01-01T09:00:00Z" }),
+        );
+        assert_eq!(too_late["result"]["isError"], true);
+        assert!(session.db.scheduled_posts().expect("lists").is_empty());
         let bad = call(
             &session,
             "queue_job",

@@ -15,10 +15,11 @@ use chrono::Utc;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, EventTarget, Manager};
 
-use crate::db::Db;
-use crate::error::Result;
+use crate::db::{Db, ScheduledPost};
+use crate::error::{AppError, Result};
+use crate::network::Network;
 use crate::site::{self, SHELL_LABEL};
-use crate::{ops, scheduled_format};
+use crate::{compose, ops, scheduled_format};
 
 const TICK: Duration = Duration::from_secs(20);
 /// A post is "missed" only once it is this far past due.
@@ -90,7 +91,7 @@ fn pass(app: &AppHandle) -> Result<()> {
             "schedule",
             Some(post.id),
         ) {
-            db.settle_post(post.id, "failed", &err.to_string())?;
+            db.settle_post(post.id, "failed", err.message())?;
             changed(app);
         }
         return Ok(());
@@ -105,4 +106,56 @@ fn pass(app: &AppHandle) -> Result<()> {
 
 pub fn changed(app: &AppHandle) {
     let _ = app.emit_to(EventTarget::webview(SHELL_LABEL), EVENT_SCHEDULE, ());
+}
+
+/// Writes a post down for later — the Write panel's and the MCP tool's one
+/// way in. It is checked now by the rule it will be posted under, rather
+/// than refused at its time with nobody watching.
+pub fn schedule(
+    db: &Db,
+    network: Network,
+    markdown: &str,
+    scheduled_at: &str,
+) -> Result<ScheduledPost> {
+    let when = chrono::DateTime::parse_from_rfc3339(scheduled_at)
+        .map_err(|e| AppError::InvalidInput(format!("That is not an RFC 3339 time: {e}")))?;
+    if when < Utc::now() {
+        return Err(AppError::InvalidInput("That time has passed.".into()));
+    }
+    let parts: Vec<String> = compose::prepare(network, markdown)?
+        .parts
+        .into_iter()
+        .map(|p| p.text)
+        .collect();
+    if parts.is_empty() {
+        return Err(AppError::InvalidInput("Nothing to post.".into()));
+    }
+    ops::validate(network, "compose", &json!({ "parts": parts }))?;
+    db.schedule_post(network, &parts, &scheduled_format(when.with_timezone(&Utc)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_post_is_scheduled_only_by_the_rule_it_will_go_out_under() {
+        let db = Db::open_in_memory().expect("db");
+        let later = scheduled_format(Utc::now() + chrono::Duration::hours(1));
+        let earlier = scheduled_format(Utc::now() - chrono::Duration::minutes(5));
+
+        let post = schedule(&db, Network::X, "one\n\n---\n\ntwo", &later).expect("schedules");
+        assert_eq!(post.parts, vec!["one", "two"]);
+        assert_eq!(post.status, "scheduled");
+
+        let too_late = schedule(&db, Network::X, "hi", &earlier).expect_err("in the past");
+        assert!(too_late.to_string().contains("has passed"));
+        assert!(schedule(&db, Network::X, "hi", "tomorrow").is_err());
+        assert!(schedule(&db, Network::X, "   ", &later).is_err());
+        let thread = schedule(&db, Network::Bluesky, "one\n\n---\n\ntwo", &later)
+            .expect_err("Bluesky takes one post at a time");
+        assert!(thread.to_string().contains("one post at a time"));
+        assert!(schedule(&db, Network::Threads, "hi", &later).is_err());
+        assert_eq!(db.scheduled_posts().expect("lists").len(), 1);
+    }
 }

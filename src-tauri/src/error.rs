@@ -28,6 +28,19 @@ pub enum AppError {
     UpdateSourceUnreachable(String),
 }
 
+impl AppError {
+    /// The message without its code, for a line a person reads.
+    pub fn message(&self) -> &str {
+        match self {
+            Self::InvalidInput(m)
+            | Self::NotFound(m)
+            | Self::Internal(m)
+            | Self::NoRelease(m)
+            | Self::UpdateSourceUnreachable(m) => m,
+        }
+    }
+}
+
 impl serde::Serialize for AppError {
     fn serialize<S: serde::Serializer>(
         &self,
