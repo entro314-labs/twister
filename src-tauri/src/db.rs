@@ -712,6 +712,17 @@ impl Db {
         )?)
     }
 
+    /// How many posts are scheduled and the newest one's id: changes when
+    /// another process — the MCP binary — adds one.
+    pub fn schedule_mark(&self) -> Result<(i64, i64)> {
+        let conn = self.lock();
+        Ok(conn.query_row(
+            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM scheduled_posts",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?)
+    }
+
     /// Removes a scheduled post — not one being posted right now, whose
     /// outcome the running job is about to write.
     pub fn delete_scheduled_post(&self, id: i64) -> Result<()> {
@@ -1497,8 +1508,10 @@ mod tests {
                 .status,
             "missed"
         );
+        let before = db.schedule_mark().expect("marks");
         db.delete_scheduled_post(later.id).expect("deletes");
         assert_eq!(db.scheduled_posts().expect("lists").len(), 1);
+        assert_ne!(db.schedule_mark().expect("marks"), before);
     }
 
     #[test]

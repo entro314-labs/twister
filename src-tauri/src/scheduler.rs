@@ -47,9 +47,21 @@ impl Scheduler {
 }
 
 fn run(app: &AppHandle, wakeups: &Receiver<()>) {
+    // Posts the MCP binary scheduled arrive in the store without a word to
+    // this process; a change in the schedule's shape is how the shell hears.
+    let mut mark = None;
     loop {
         if let Err(err) = pass(app) {
             log::error!("scheduler pass failed: {err}");
+        }
+        match app.state::<Db>().schedule_mark() {
+            Ok(now) => {
+                if mark.is_some_and(|before| before != now) {
+                    changed(app);
+                }
+                mark = Some(now);
+            }
+            Err(err) => log::warn!("could not read the schedule: {err}"),
         }
         match wakeups.recv_timeout(TICK) {
             Ok(()) | Err(RecvTimeoutError::Timeout) => {}
