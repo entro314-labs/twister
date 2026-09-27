@@ -267,7 +267,7 @@ pub async fn export_posts(
     format: String,
 ) -> Result<Option<String>> {
     let format = export::Format::parse(&format)?;
-    let name = if filter.source.as_deref() == Some("Bookmarks") {
+    let name = if filter.bookmarked == Some(true) {
         "twister-bookmarks"
     } else {
         "twister-posts"

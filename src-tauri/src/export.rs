@@ -143,7 +143,7 @@ pub fn posts_csv(posts: &[Post]) -> String {
             post.reposts.to_string(),
             post.replies.to_string(),
             post.views.to_string(),
-            flag(Some(post.bookmarked)),
+            flag(post.bookmarked),
             post.media
                 .iter()
                 .map(|m| m.url.clone())

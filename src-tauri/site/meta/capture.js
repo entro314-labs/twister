@@ -119,7 +119,7 @@
       reposts: num(info.repost_count),
       replies: num(info.direct_reply_count, node.comment_count),
       views: num(node.view_count, node.play_count),
-      bookmarked: Boolean(node.has_viewer_saved),
+      bookmarked: flag(node.has_viewer_saved),
       media: media.slice(0, 8),
       repostOf: ID.test(repostOf) ? repostOf : '',
       replyTo: '',

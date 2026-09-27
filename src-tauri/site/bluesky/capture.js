@@ -16,7 +16,7 @@
   if (window.__twisterCapture) return
   const common = window.__twisterCommon
   if (!common) return
-  const { str, num, count, iso, walk } = common
+  const { str, num, count, flag, iso, walk } = common
 
   const API = /\/xrpc\/((?:app\.bsky|com\.atproto|chat\.bsky)\.[A-Za-z0-9.]+)/
   const DID = /^did:[a-z]+:[A-Za-z0-9._:%-]{1,200}$/
@@ -105,7 +105,7 @@
       reposts: num(node.repostCount),
       replies: num(node.replyCount),
       views: 0,
-      bookmarked: Boolean(viewer.bookmarked),
+      bookmarked: flag(viewer.bookmarked),
       media: media.slice(0, 8),
       repostOf: '',
       replyTo: parent && POST_URI.test(str(parent.uri, 256)) ? parent.uri : '',

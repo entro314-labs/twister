@@ -101,6 +101,14 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **Bookmarks were X's alone, and not only bookmarks.** A bookmark was a
+  post first seen on X's `Bookmarks` page, so Bluesky's and Meta's saved
+  posts never counted, the export from `twister-mcp` came back empty there,
+  and a post quoted inside a bookmark was exported as one. A bookmark is now
+  a post the site says the account saved, on any network; a sighting that
+  does not say leaves it as it was, and one that says it was removed
+  removes it. Posts has a *Show: Bookmarks only* filter in place of picking
+  the source.
 - **`twister-mcp` claimed MCP 2026-07-28 but spoke the handshake protocol.**
   It answered every `initialize` with 2026-07-28 — a revision that has no
   `initialize` — whatever the host asked for, had no `server/discover`, and

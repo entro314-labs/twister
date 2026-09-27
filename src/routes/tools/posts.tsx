@@ -43,8 +43,8 @@ const KIND_LABEL: Record<PostKind, string> = {
 /**
  * Posts the capture hook has seen, on one network at a time: a timeline, a profile, a list,
  * bookmarks. Filter, export, and — for your own, where the network allows it — delete in bulk.
- * Bookmarks export is this screen with "Seen in" set to the bookmarks source after a scan of the
- * bookmarks page.
+ * Bookmarks export is this screen showing bookmarks only, after a scan of the bookmarks page: a
+ * post is a bookmark when the site said the signed-in account saved it, on any network.
  */
 function PostsScreen() {
   const tab = useActiveTab()
@@ -62,6 +62,7 @@ function PostsScreen() {
   const [kind, setKind] = React.useState<'' | PostKind>('')
   const [author, setAuthor] = React.useState('')
   const [media, setMedia] = React.useState<'' | 'yes' | 'no'>('')
+  const [bookmarksOnly, setBookmarksOnly] = React.useState(false)
   const [sort, setSort] = React.useState<NonNullable<PostFilter['sort']>>('seen')
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set())
   const [dryRun, setDryRun] = React.useState(true)
@@ -74,10 +75,11 @@ function PostsScreen() {
       kind: kind || undefined,
       author: author || undefined,
       hasMedia: media === '' ? undefined : media === 'yes',
+      bookmarked: bookmarksOnly || undefined,
       sort,
       limit: 500,
     }),
-    [network, search, source, kind, author, media, sort],
+    [network, search, source, kind, author, media, bookmarksOnly, sort],
   )
   const posts = usePosts(filter)
   const rows = posts.data ?? []
@@ -132,7 +134,7 @@ function PostsScreen() {
           {counts.data
             ? `${compact(counts.data.posts)} posts from ${info.name} in the store. `
             : ''}
-          For bookmarks, open Bookmarks (⌘5), scan, then pick the bookmarks source below.
+          For bookmarks, open Bookmarks (⌘5), scan, then show bookmarks only below.
         </p>
       </Section>
 
@@ -193,6 +195,17 @@ function PostsScreen() {
               <option value="">Either</option>
               <option value="yes">With photos or video</option>
               <option value="no">Text only</option>
+            </Select>
+          </Field>
+          <Field label="Show">
+            <Select
+              value={bookmarksOnly ? 'bookmarks' : 'all'}
+              onChange={(event) => {
+                setBookmarksOnly(event.target.value === 'bookmarks')
+              }}
+            >
+              <option value="all">Everything</option>
+              <option value="bookmarks">Bookmarks only</option>
             </Select>
           </Field>
           <Field label="Sort">

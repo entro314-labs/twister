@@ -132,7 +132,7 @@
       reposts: num(legacy.retweet_count),
       replies: num(legacy.reply_count),
       views: num(node.views && node.views.count),
-      bookmarked: Boolean(legacy.bookmarked),
+      bookmarked: flag(legacy.bookmarked),
       media: readMedia(legacy),
       repostOf,
       replyTo: str(legacy.in_reply_to_status_id_str, 25),

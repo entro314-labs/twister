@@ -90,7 +90,10 @@ pub struct Post {
     pub reposts: i64,
     pub replies: i64,
     pub views: i64,
-    pub bookmarked: bool,
+    /// Whether it is in the signed-in account's bookmarks — what a bookmarks
+    /// export is. `None` only on the way in, from a sighting that did not
+    /// say, which leaves the stored answer alone.
+    pub bookmarked: Option<bool>,
     pub media: Vec<Media>,
     /// For a repost: the id of the post it repeats.
     pub repost_of: String,
@@ -347,7 +350,8 @@ impl Db {
                 "INSERT INTO posts (network, slug, id, author_id, author_handle, text, created_at,
                     kind, lang, likes, reposts, replies, views, bookmarked, media, repost_of,
                     reply_to, quoted_id, source, first_seen, last_seen)
-                 VALUES (?19, ?20, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)
+                 VALUES (?19, ?20, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, COALESCE(?12, 0), ?13,
+                    ?14, ?15, ?16, ?17, ?18, ?18)
                  ON CONFLICT(network, id) DO UPDATE SET
                     slug = CASE WHEN excluded.slug = '' THEN posts.slug ELSE excluded.slug END,
                     author_id = excluded.author_id, author_handle = excluded.author_handle,
@@ -356,12 +360,9 @@ impl Db {
                     kind = excluded.kind,
                     lang = excluded.lang, likes = excluded.likes, reposts = excluded.reposts,
                     replies = excluded.replies, views = excluded.views,
-                    bookmarked = excluded.bookmarked, media = excluded.media,
+                    bookmarked = COALESCE(?12, posts.bookmarked), media = excluded.media,
                     repost_of = excluded.repost_of, reply_to = excluded.reply_to,
-                    quoted_id = excluded.quoted_id,
-                    -- A bookmarks sighting is the one worth keeping as the source.
-                    source = CASE WHEN posts.source = 'Bookmarks' AND excluded.source != 'Bookmarks'
-                                  THEN posts.source ELSE excluded.source END,
+                    quoted_id = excluded.quoted_id, source = excluded.source,
                     last_seen = excluded.last_seen",
                 params![
                     post.id,
@@ -780,7 +781,7 @@ fn post_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Post> {
         reposts: row.get(8)?,
         replies: row.get(9)?,
         views: row.get(10)?,
-        bookmarked: row.get(11)?,
+        bookmarked: Some(row.get(11)?),
         media: serde_json::from_str(&media).unwrap_or_default(),
         repost_of: row.get(13)?,
         reply_to: row.get(14)?,
@@ -1348,7 +1349,7 @@ mod tests {
     }
 
     #[test]
-    fn posts_round_trip_media_and_keep_the_bookmarks_source() {
+    fn posts_round_trip_media_and_keep_a_bookmark_until_told_otherwise() {
         let db = Db::open_in_memory().expect("db");
         let post = Post {
             id: "10".into(),
@@ -1357,7 +1358,7 @@ mod tests {
             created_at: "2026-01-01T09:00:00Z".into(),
             kind: "post".into(),
             source: "Bookmarks".into(),
-            bookmarked: true,
+            bookmarked: Some(true),
             media: vec![Media {
                 kind: "photo".into(),
                 url: "https://pbs.twimg.com/media/a.jpg?name=orig".into(),
@@ -1366,16 +1367,24 @@ mod tests {
         };
         db.record_posts(std::slice::from_ref(&post))
             .expect("records");
+        // Seen again on a timeline whose response did not say.
         let again = Post {
             source: "HomeTimeline".into(),
             likes: 3,
             created_at: String::new(),
-            ..post
+            bookmarked: None,
+            ..post.clone()
         };
         db.record_posts(&[again]).expect("records");
         let read = db.posts(&PostFilter::default()).expect("reads");
         assert_eq!(read.len(), 1);
-        assert_eq!(read[0].source, "Bookmarks");
+        assert_eq!(read[0].source, "HomeTimeline");
+        assert_eq!(read[0].bookmarked, Some(true));
+        let bookmarks = PostFilter {
+            bookmarked: Some(true),
+            ..PostFilter::default()
+        };
+        assert_eq!(db.posts(&bookmarks).expect("reads").len(), 1);
         // The second sighting carried no date; the first one's stands.
         assert_eq!(read[0].created_at, "2026-01-01T09:00:00Z");
         assert_eq!(read[0].likes, 3);
@@ -1400,6 +1409,14 @@ mod tests {
         assert!(db.post(Network::X, "10").expect("reads").is_some());
         assert!(db.post(Network::X, "11").expect("reads").is_none());
         assert!(db.post(Network::Bluesky, "10").expect("reads").is_none());
+
+        // Un-bookmarked on the site, and the site said so.
+        db.record_posts(&[Post {
+            bookmarked: Some(false),
+            ..post
+        }])
+        .expect("records");
+        assert!(db.posts(&bookmarks).expect("reads").is_empty());
 
         let counts = db.counts(None).expect("counts");
         assert_eq!(counts.posts, 1);

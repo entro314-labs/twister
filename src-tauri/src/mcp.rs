@@ -233,7 +233,7 @@ impl Session {
                 let mut filter: PostFilter = serde_json::from_value(filter)?;
                 filter.limit = filter.limit.or(Some(db::MAX_ROWS));
                 if what == "bookmarks" {
-                    filter.source = Some("Bookmarks".into());
+                    filter.bookmarked = Some(true);
                 }
                 let posts = self.db.posts(&filter)?;
                 (export::render_posts(&posts, format)?, posts.len())
@@ -353,7 +353,7 @@ fn tools() -> Vec<Value> {
         ),
         tool(
             "list_posts",
-            "Posts the app has seen, filtered. Bookmarks are posts with source Bookmarks.",
+            "Posts the app has seen, filtered. Bookmarks are posts with bookmarked: true, on any network.",
             post_filter.clone(),
         ),
         tool(
