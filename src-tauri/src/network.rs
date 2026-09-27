@@ -167,8 +167,11 @@ impl Network {
             }
             // A domain name: labels of letters, digits and hyphens, at least
             // two of them, none empty, none starting or ending in a hyphen.
+            // `handle.invalid` is what Bluesky shows for one that no longer
+            // resolves: no profile lives there.
             Self::Bluesky => {
-                handle.len() <= 253
+                handle != "handle.invalid"
+                    && handle.len() <= 253
                     && handle.contains('.')
                     && handle.split('.').all(|label| {
                         !label.is_empty()
@@ -549,6 +552,7 @@ mod tests {
         assert!(!Network::Bluesky.valid_handle("alice..com"));
         assert!(!Network::Bluesky.valid_handle("-alice.com"));
         assert!(!Network::Bluesky.valid_handle("did:plc:abc"));
+        assert!(!Network::Bluesky.valid_handle("handle.invalid"));
         assert!(Network::Threads.valid_handle("zuck"));
         assert!(Network::Instagram.valid_handle("tom.developer"));
         assert!(Network::Instagram.valid_handle("ai_work_flows_"));

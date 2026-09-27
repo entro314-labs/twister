@@ -101,6 +101,9 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **Bluesky's `handle.invalid` was stored as a handle**, overwriting the
+  real one and breaking that person's profile and post links until seen
+  again. A sighting under that placeholder is now dropped.
 - **Your own scripts and styles ran on every network, and on sign-in
   pages.** The folders are for X, as Settings says, but they were injected
   into Bluesky, Threads and Instagram tabs too — where a script clicking for
