@@ -19,7 +19,7 @@
   if (window.__twisterCapture) return
   const common = window.__twisterCommon
   if (!common) return
-  const { str, num, flag, iso, walk } = common
+  const { str, num, count, flag, iso, walk } = common
 
   // X's API lives at /i/api/ on the page's own origin and, increasingly, at
   // api.x.com; the operation name is the last path segment of a GraphQL call.
@@ -51,9 +51,9 @@
       bio: str(legacy.description, 2000),
       location: str((node.location && node.location.location) || legacy.location, 200),
       website: website_,
-      followers: num(legacy.followers_count, legacy.normal_followers_count),
-      following: num(legacy.friends_count, legacy.following_count),
-      posts: num(legacy.statuses_count),
+      followers: count(legacy.followers_count, legacy.normal_followers_count),
+      following: count(legacy.friends_count, legacy.following_count),
+      posts: count(legacy.statuses_count),
       verified: Boolean(
         node.is_blue_verified || legacy.verified || (node.verification && node.verification.verified),
       ),

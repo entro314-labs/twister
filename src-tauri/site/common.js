@@ -592,6 +592,18 @@
     return 0
   }
 
+  // A count the site sent, or null when it sent none — which is not zero: a
+  // person seen as a post's author carries no counts on Bluesky or Meta's
+  // sites, and must not wipe the ones their profile sent.
+  function count(...values) {
+    const sent = values.filter(
+      (value) =>
+        (typeof value === 'number' && Number.isFinite(value)) ||
+        (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value.replace(/,/g, '')))),
+    )
+    return sent.length ? num(...sent) : null
+  }
+
   function flag(...values) {
     for (const value of values) if (typeof value === 'boolean') return value
     return null
@@ -672,6 +684,7 @@
     insertText,
     str,
     num,
+    count,
     flag,
     iso,
     walk,

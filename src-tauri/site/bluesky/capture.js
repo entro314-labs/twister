@@ -16,7 +16,7 @@
   if (window.__twisterCapture) return
   const common = window.__twisterCommon
   if (!common) return
-  const { str, num, iso, walk } = common
+  const { str, num, count, iso, walk } = common
 
   const API = /\/xrpc\/((?:app\.bsky|com\.atproto|chat\.bsky)\.[A-Za-z0-9.]+)/
   const DID = /^did:[a-z]+:[A-Za-z0-9._:%-]{1,200}$/
@@ -36,9 +36,9 @@
       bio: str(node.description, 2000),
       location: '',
       website: '',
-      followers: num(node.followersCount),
-      following: num(node.followsCount),
-      posts: num(node.postsCount),
+      followers: count(node.followersCount),
+      following: count(node.followsCount),
+      posts: count(node.postsCount),
       verified: verification.verifiedStatus === 'valid' || verification.trustedVerifierStatus === 'valid',
       protected: false,
       avatar: str(node.avatar, 500),

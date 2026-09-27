@@ -20,7 +20,7 @@
   if (window.__twisterCapture) return
   const common = window.__twisterCommon
   if (!common) return
-  const { str, num, flag, iso, walk } = common
+  const { str, num, count, flag, iso, walk } = common
 
   const API = /\/(?:graphql\/query|api\/graphql|api\/v1\/)/
   const HANDLE = /^[A-Za-z0-9._]{1,30}$/
@@ -40,9 +40,9 @@
       bio: str(node.biography, 2000),
       location: '',
       website: str(node.external_url, 500),
-      followers: num(node.follower_count),
-      following: num(node.following_count),
-      posts: num(node.media_count),
+      followers: count(node.follower_count),
+      following: count(node.following_count),
+      posts: count(node.media_count),
       verified: Boolean(node.is_verified),
       protected: Boolean(node.is_private || node.text_post_app_is_private),
       avatar: str(node.profile_pic_url || node.hd_profile_pic_url_info && node.hd_profile_pic_url_info.url, 500),

@@ -100,9 +100,9 @@ pub fn sanitize(network: Network, batch: Batch) -> Result<(Vec<User>, Vec<Post>,
             bio: clip(&user.bio, MAX_BIO),
             location: clip(&user.location, MAX_SHORT),
             website: clip(&user.website, MAX_URL),
-            followers: user.followers.max(0),
-            following: user.following.max(0),
-            posts: user.posts.max(0),
+            followers: user.followers.map(|v| v.max(0)),
+            following: user.following.map(|v| v.max(0)),
+            posts: user.posts.map(|v| v.max(0)),
             verified: user.verified,
             protected: user.protected,
             avatar: if media_url_ok(network, &user.avatar) {
@@ -265,6 +265,24 @@ mod tests {
     }
 
     #[test]
+    fn a_count_the_page_did_not_send_is_unknown_not_zero() {
+        let batch: Batch = serde_json::from_value(serde_json::json!({
+            "source": "app.bsky.feed.getAuthorFeed",
+            "users": [
+                { "id": "did:plc:a", "handle": "a.bsky.social", "followers": null },
+                { "id": "did:plc:b", "handle": "b.bsky.social", "followers": 12, "following": 0 }
+            ]
+        }))
+        .expect("parses");
+        let (users, _, dropped) = sanitize(Network::Bluesky, batch).expect("ok");
+        assert_eq!(dropped, 0);
+        assert_eq!(users[0].followers, None);
+        assert_eq!(users[0].posts, None);
+        assert_eq!(users[1].followers, Some(12));
+        assert_eq!(users[1].following, Some(0));
+    }
+
+    #[test]
     fn sanitize_drops_bad_rows_and_clips_text() {
         let batch = Batch {
             source: "Following".into(),
@@ -273,7 +291,7 @@ mod tests {
                     id: "1".into(),
                     handle: "alice".into(),
                     bio: "x".repeat(5000),
-                    followers: -3,
+                    followers: Some(-3),
                     avatar: "https://evil.example/a.png".into(),
                     created_at: "not a date".into(),
                     ..User::default()
@@ -323,7 +341,7 @@ mod tests {
         assert_eq!(users.len(), 1);
         assert_eq!(users[0].network, Network::X);
         assert_eq!(users[0].bio.len(), MAX_BIO);
-        assert_eq!(users[0].followers, 0);
+        assert_eq!(users[0].followers, Some(0));
         assert_eq!(users[0].avatar, "");
         assert_eq!(users[0].created_at, "");
         assert_eq!(users[0].source, "Following");

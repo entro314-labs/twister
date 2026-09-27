@@ -39,9 +39,12 @@ pub struct User {
     pub bio: String,
     pub location: String,
     pub website: String,
-    pub followers: i64,
-    pub following: i64,
-    pub posts: i64,
+    /// The counts. `None` only on the way in, for a sighting that did not
+    /// carry them — Bluesky's and Meta's post authors do not — which then
+    /// leaves the stored ones alone; a stored row always has them.
+    pub followers: Option<i64>,
+    pub following: Option<i64>,
+    pub posts: Option<i64>,
     pub verified: bool,
     pub protected: bool,
     pub avatar: String,
@@ -292,12 +295,15 @@ impl Db {
                 "INSERT INTO users (network, id, handle, name, bio, location, website, followers,
                     following, posts, verified, protected, avatar, created_at, follows_me,
                     followed_by_me, source, first_seen, last_seen)
-                 VALUES (?18, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17)
+                 VALUES (?18, ?1, ?2, ?3, ?4, ?5, ?6, COALESCE(?7, 0), COALESCE(?8, 0),
+                    COALESCE(?9, 0), ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17)
                  ON CONFLICT(network, id) DO UPDATE SET
-                    handle = excluded.handle, name = excluded.name, bio = excluded.bio,
+                    handle = excluded.handle, name = excluded.name,
+                    bio = CASE WHEN excluded.bio = '' THEN users.bio ELSE excluded.bio END,
                     location = excluded.location, website = excluded.website,
-                    followers = excluded.followers, following = excluded.following,
-                    posts = excluded.posts, verified = excluded.verified,
+                    followers = COALESCE(?7, users.followers),
+                    following = COALESCE(?8, users.following),
+                    posts = COALESCE(?9, users.posts), verified = excluded.verified,
                     protected = excluded.protected, avatar = excluded.avatar,
                     created_at = CASE WHEN excluded.created_at = '' THEN users.created_at ELSE excluded.created_at END,
                     follows_me = COALESCE(excluded.follows_me, users.follows_me),
@@ -737,9 +743,9 @@ fn user_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
         bio: row.get(3)?,
         location: row.get(4)?,
         website: row.get(5)?,
-        followers: row.get(6)?,
-        following: row.get(7)?,
-        posts: row.get(8)?,
+        followers: Some(row.get(6)?),
+        following: Some(row.get(7)?),
+        posts: Some(row.get(8)?),
         verified: row.get(9)?,
         protected: row.get(10)?,
         avatar: row.get(11)?,
@@ -1243,15 +1249,42 @@ mod tests {
         let first_seen = seen[0].first_seen.clone();
 
         let mut again = user("1", "alice_renamed");
-        again.followers = 42;
+        again.followers = Some(42);
+        again.bio = "Rust".into();
         db.record_users(&[again]).expect("records");
         let seen = db.users(&UserFilter::default()).expect("reads");
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].handle, "alice_renamed");
-        assert_eq!(seen[0].followers, 42);
+        assert_eq!(seen[0].followers, Some(42));
         assert_eq!(seen[0].first_seen, first_seen);
         // The second sighting said nothing about the relationship; the first stands.
         assert_eq!(seen[0].follows_me, Some(true));
+
+        // Seen again as a post's author: no counts, no bio. They stay.
+        let mut stub = user("1", "alice_renamed");
+        stub.following = Some(7);
+        db.record_users(&[stub]).expect("records");
+        let seen = db.users(&UserFilter::default()).expect("reads");
+        assert_eq!(seen[0].followers, Some(42));
+        assert_eq!(seen[0].following, Some(7));
+        assert_eq!(seen[0].bio, "Rust");
+        let filtered = db
+            .users(&UserFilter {
+                min_followers: Some(40),
+                ..UserFilter::default()
+            })
+            .expect("reads");
+        assert_eq!(filtered.len(), 1);
+
+        // Someone only ever seen without counts is stored with none, as zero.
+        db.record_users(&[user("2", "bob")]).expect("records");
+        let bob = db
+            .users(&UserFilter {
+                search: "bob".into(),
+                ..UserFilter::default()
+            })
+            .expect("reads");
+        assert_eq!(bob[0].followers, Some(0));
     }
 
     #[test]
@@ -1259,11 +1292,11 @@ mod tests {
         let db = Db::open_in_memory().expect("db");
         let mut a = user("1", "alice");
         a.bio = "Rust and 100% coffee".into();
-        a.followers = 10;
+        a.followers = Some(10);
         a.follows_me = Some(false);
         a.followed_by_me = Some(true);
         let mut b = user("2", "bob");
-        b.followers = 1000;
+        b.followers = Some(1000);
         b.follows_me = Some(true);
         b.followed_by_me = Some(true);
         b.verified = true;

@@ -101,6 +101,12 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **Follower counts and bios were wiped on Bluesky, Threads and Instagram.**
+  Those sites send a post's author without counts or a bio, and the store
+  took the missing counts as zeros — so scrolling someone's feed after
+  opening their profile zeroed them, and follower filters and exports went
+  wrong. A count or a bio a sighting does not carry now leaves the stored
+  one alone.
 - **An operation refused as "still running" ran anyway, later.** The job was
   written to the ledger as queued before the one-at-a-time check, so the
   scheduler picked it up as soon as the running one ended — a live unfollow,

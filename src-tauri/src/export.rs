@@ -97,9 +97,9 @@ pub fn users_csv(users: &[User]) -> String {
             user.bio.clone(),
             user.location.clone(),
             user.website.clone(),
-            user.followers.to_string(),
-            user.following.to_string(),
-            user.posts.to_string(),
+            user.followers.unwrap_or_default().to_string(),
+            user.following.unwrap_or_default().to_string(),
+            user.posts.unwrap_or_default().to_string(),
             flag(Some(user.verified)),
             flag(Some(user.protected)),
             flag(user.follows_me),
@@ -199,8 +199,8 @@ pub fn users_markdown(users: &[User]) -> String {
             "| [@{0}]({5}) | {1} | {2} | {3} | {4} |",
             user.handle,
             user.name.replace('|', "\\|"),
-            user.followers,
-            user.following,
+            user.followers.unwrap_or_default(),
+            user.following.unwrap_or_default(),
             user.bio.replace('|', "\\|").replace('\n', " "),
             user.url()
         );
