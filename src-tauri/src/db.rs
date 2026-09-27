@@ -15,7 +15,9 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use rusqlite::{Connection, OptionalExtension, params, params_from_iter, types::ToSql};
+use rusqlite::{
+    Connection, OptionalExtension, TransactionBehavior, params, params_from_iter, types::ToSql,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result, internal};
@@ -220,8 +222,10 @@ impl Db {
     }
 
     fn from_connection(conn: Connection) -> Result<Self> {
-        conn.pragma_update(None, "journal_mode", "WAL")?;
+        // The wait first: switching a fresh file to WAL takes a lock another
+        // process opening it at the same moment may hold.
         conn.pragma_update(None, "busy_timeout", 5000)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
         let db = Self {
             conn: Mutex::new(conn),
         };
@@ -237,40 +241,48 @@ impl Db {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// The schema ladder: each step runs once, in order, with the version
-    /// written after it, so an interrupted upgrade resumes.
+    /// The schema ladder: each step runs once, in order. A step and the
+    /// version it leaves behind commit together, so an interrupted upgrade
+    /// resumes at the step it was on rather than half through it; and the
+    /// version is read under the write lock, so the app and the MCP binary
+    /// opening one store at once cannot both run the same step.
     fn migrate(&self) -> Result<()> {
-        let conn = self.lock();
+        let mut conn = self.lock();
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
         )?;
-        let mut version: i64 = conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = 'schema_version'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(0);
-        while version < SCHEMA_VERSION {
+        loop {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let version: i64 = tx
+                .query_row(
+                    "SELECT value FROM meta WHERE key = 'schema_version'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            if version >= SCHEMA_VERSION {
+                tx.commit()?;
+                return Ok(());
+            }
             let next = version + 1;
-            conn.execute_batch(step_sql(next))?;
-            conn.execute(
+            tx.execute_batch(step_sql(next))?;
+            tx.execute(
                 "INSERT INTO meta (key, value) VALUES ('schema_version', ?1)
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 params![next.to_string()],
             )?;
-            version = next;
+            tx.commit()?;
         }
-        Ok(())
     }
 
     // ─── Capture ────────────────────────────────────────────────────────────
 
     /// Upserts what the page saw. A later sighting overwrites counts and
-    /// text; `first_seen` is kept, and a relationship flag X omitted this
-    /// time does not erase one it sent before.
+    /// text; `first_seen` is kept, and what a sighting did not carry — a
+    /// relationship flag, a count, a bio, a join date — does not erase what
+    /// an earlier one sent.
     pub fn record_users(&self, users: &[User]) -> Result<usize> {
         let mut conn = self.lock();
         let tx = conn.transaction()?;
@@ -1118,6 +1130,66 @@ mod tests {
         assert_eq!(counts.users, 2);
         assert_eq!(counts.networks.len(), 2);
         assert_eq!(db.counts(Some(Network::Threads)).expect("counts").users, 1);
+    }
+
+    #[test]
+    fn a_failed_step_leaves_the_store_as_it_was_and_openers_do_not_collide() {
+        let dir = std::env::temp_dir().join(format!(
+            "twister-migrate-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join(DB_FILE);
+        {
+            let conn = Connection::open(&path).expect("conn");
+            conn.execute_batch(
+                "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 INSERT INTO meta VALUES ('schema_version', '1');",
+            )
+            .expect("meta");
+            conn.execute_batch(step_sql(1)).expect("v1");
+            conn.execute_batch(
+                "INSERT INTO users (id, handle, first_seen, last_seen) VALUES ('1', 'alice', 't', 't');
+                 CREATE TABLE users_v2 (x);",
+            )
+            .expect("rows, and the debris a step 2 killed half-way used to leave");
+        }
+        // Step 2 cannot run over the debris: it fails whole, and the v1
+        // store is untouched rather than half-migrated.
+        assert!(Db::open_at(&path).is_err());
+        {
+            let conn = Connection::open(&path).expect("conn");
+            let version: String = conn
+                .query_row(
+                    "SELECT value FROM meta WHERE key = 'schema_version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("version");
+            assert_eq!(version, "1");
+            let users: i64 = conn
+                .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
+                .expect("users");
+            assert_eq!(users, 1);
+            conn.execute_batch("DROP TABLE users_v2;").expect("clears");
+        }
+        // Two openers at once: one migrates, the other finds it done.
+        let openers: Vec<_> = (0..2)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || Db::open_at(&path).map(|_| ()))
+            })
+            .collect();
+        for opener in openers {
+            opener.join().expect("joins").expect("opens");
+        }
+        let db = Db::open_at(&path).expect("opens");
+        let users = db.users(&UserFilter::default()).expect("reads");
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].network, Network::X);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

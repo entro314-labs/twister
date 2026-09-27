@@ -101,6 +101,11 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **A store upgrade cut short could lock Twister out of its own file.** Each
+  schema step now commits together with the version it leaves behind, so an
+  upgrade interrupted half-way resumes instead of failing on its own debris,
+  and the app and `twister-mcp` opening the store at the same moment no
+  longer both run the same step.
 - **Videos and GIFs were blank with *Hide promoted posts* on.** X wraps
   every video player in the same placement-tracking box it wraps a promoted
   post in, and the rule hid them all; only a box that holds a post is hidden
