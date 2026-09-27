@@ -101,6 +101,11 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **A download that could not start said nothing.** Pressing the button
+  before the store had the post's media, or with capture off, did nothing
+  visible; the reason now shows in the status bar. Bluesky photos were
+  saved as `.bin`: the format after the `@` on Bluesky's CDN names is now
+  the extension.
 - **Exports stopped at 500 rows without saying so.** The People and Posts
   panels exported the page of rows they show, and `twister-mcp`'s `export`
   the default page; 2,000 bookmarks came out as 500. An export is now

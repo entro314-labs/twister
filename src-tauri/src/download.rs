@@ -76,10 +76,17 @@ pub fn extension(url: &str) -> String {
             .find(|(k, _)| k == "format")
             .map(|(_, v)| v.into_owned())
     });
+    // Bluesky's CDN names the format after an `@` on the hash:
+    // `…/bafkrei…@jpeg`.
     let from_path = parsed.as_ref().and_then(|p| {
-        Path::new(p.path())
-            .extension()
-            .map(|e| e.to_string_lossy().into_owned())
+        let last = p.path().rsplit('/').next().unwrap_or_default();
+        last.rsplit_once('@')
+            .map(|(_, format)| format.to_string())
+            .or_else(|| {
+                Path::new(last)
+                    .extension()
+                    .map(|e| e.to_string_lossy().into_owned())
+            })
     });
     let ext = from_query
         .or(from_path)
@@ -296,6 +303,14 @@ mod tests {
         assert_eq!(
             extension("https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:a/bafkreic6nb7dy"),
             "bin"
+        );
+        assert_eq!(
+            extension("https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:a/bafkreic6nb7dy@jpeg"),
+            "jpg"
+        );
+        assert_eq!(
+            extension("https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:a/bafkreic6nb7dy@png"),
+            "png"
         );
         // 1288834974657 + (id >> 22) ms.
         assert_eq!(date_from_id("1600000000000000000").expect("ok"), "20221206");

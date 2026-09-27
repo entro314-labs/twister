@@ -442,7 +442,11 @@ pub fn site_op_progress(
 #[tauri::command]
 pub fn site_download(app: AppHandle, webview: Webview, request: download::Request) -> Result<()> {
     let network = caller_network(&app, &webview)?;
-    download::start(&app, network, request)
+    // The page cannot show an error; the status bar can. A button pressed
+    // before the store has the post's media says so there, not nowhere.
+    download::start(&app, network, request).inspect_err(|err| {
+        site::notify(&app, err.message());
+    })
 }
 
 #[tauri::command]
