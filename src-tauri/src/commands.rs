@@ -256,11 +256,30 @@ pub async fn export_people(
         ..filter
     })?;
     let contents = export::render_users(&users, format)?;
-    export::save(
+    let saved = export::save(
         &app,
         &format!("twister-people.{}", format.extension()),
         &contents,
-    )
+    )?;
+    say_saved(&app, saved.as_deref(), users.len(), "person", "people");
+    Ok(saved)
+}
+
+/// A save the dialog confirmed, said in the status bar — a dismissed dialog
+/// says nothing, and the two must not look alike.
+fn say_saved(app: &AppHandle, path: Option<&str>, rows: usize, one: &str, many: &str) {
+    if let Some(path) = path {
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map_or(path.into(), |n| n.to_string_lossy());
+        site::notify(
+            app,
+            format!(
+                "Exported {rows} {} to {name}",
+                if rows == 1 { one } else { many }
+            ),
+        );
+    }
 }
 
 #[tauri::command]
@@ -281,7 +300,9 @@ pub async fn export_posts(
         ..filter
     })?;
     let contents = export::render_posts(&posts, format)?;
-    export::save(&app, &format!("{name}.{}", format.extension()), &contents)
+    let saved = export::save(&app, &format!("{name}.{}", format.extension()), &contents)?;
+    say_saved(&app, saved.as_deref(), posts.len(), "post", "posts");
+    Ok(saved)
 }
 
 #[tauri::command]

@@ -101,6 +101,8 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **A finished export and a cancelled one looked the same.** The status bar
+  now says how many rows went to which file.
 - **A list that failed to load said "Nothing captured".** People, Posts and
   the schedule now say when they are still reading, and say why when the
   store could not be read, instead of looking empty.
