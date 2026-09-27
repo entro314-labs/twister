@@ -108,11 +108,18 @@ jobs:
     # `contents: write` and the RELEASES_TOKEN secret, so a mutable external ref
     # would let any push to the kit's default branch publish releases here. Bump
     # deliberately, after reading the diff.
-    # 95a417e = kit tip 2026-09-08.
-    uses: entro314-labs/tauri-release-kit/.github/workflows/release.yml@95a417eb6fabbb19f1dc4777537110f34a7873ec
+    # 6526893 = kit tip 2026-09-26, read from 95a417e: SHA-pinned actions,
+    # SHA256SUMS + SBOM + build provenance, asset names read from the release,
+    # installer-specific updater entries. Twister still offers self-update
+    # only to AppImage on Linux (update::install_support).
+    uses: entro314-labs/tauri-release-kit/.github/workflows/release.yml@65268938beab436e35f621df935585bf80b7ad87
     permissions:
       contents: write
       pull-requests: write
+      # The kit's attest job: build provenance for the release (Sigstore),
+      # stored as an attestation on this repository.
+      id-token: write
+      attestations: write
     with:
       app_display_name: 'Twister'
       project_path: '.'
