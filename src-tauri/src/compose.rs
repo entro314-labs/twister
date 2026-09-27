@@ -94,13 +94,27 @@ fn looks_like_url(run: &str) -> bool {
         && !host.starts_with('@')
 }
 
+/// An emoji — however many code points it takes, a family or a flag or a
+/// keycap — weighs two as a whole.
+fn is_emoji(grapheme: &str) -> bool {
+    grapheme
+        .chars()
+        .any(|c| matches!(c as u32, 0x200D | 0xFE0F | 0x20E3 | 0x1F000..=0x1FAFF))
+}
+
+/// X weighs code points, not what a reader sees as one letter: Devanagari's
+/// "स्ते" is four. Everything in the light ranges weighs one, the rest two.
 fn weight(grapheme: &str) -> usize {
-    let Some(first) = grapheme.chars().next() else {
-        return 0;
-    };
-    let cp = first as u32;
-    let light = matches!(cp, 0..=4351 | 8192..=8205 | 8208..=8223 | 8242..=8247);
-    if light { 1 } else { 2 }
+    if is_emoji(grapheme) {
+        return 2;
+    }
+    grapheme
+        .chars()
+        .map(|c| {
+            let light = matches!(c as u32, 0..=4351 | 8192..=8205 | 8208..=8223 | 8242..=8247);
+            if light { 1 } else { 2 }
+        })
+        .sum()
 }
 
 /// X's weighted length.
@@ -365,6 +379,11 @@ mod tests {
         assert_eq!(count("日本語"), 6);
         assert_eq!(count("👍"), 2);
         assert_eq!(count("👨‍👩‍👧"), 2);
+        assert_eq!(count("👍🏽"), 2);
+        assert_eq!(count("🇬🇷"), 2);
+        assert_eq!(count("1️⃣"), 2);
+        // Code points, not clusters: three clusters, six code points.
+        assert_eq!(count("नमस्ते"), 6);
         assert_eq!(
             count("see https://example.com/a/very/long/path/indeed ok"),
             4 + 23 + 3

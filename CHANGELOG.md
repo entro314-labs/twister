@@ -101,6 +101,10 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **The Write panel under-counted Devanagari, Thai and other scripts with
+  combining marks for X**, and keycap emoji: X counts code points, not what
+  reads as one letter, so a part the preview said fitted could be refused by
+  X's composer. Emoji of any length still count as two.
 - **A download that could not start said nothing.** Pressing the button
   before the store had the post's media, or with capture off, did nothing
   visible; the reason now shows in the status bar. Bluesky photos were
