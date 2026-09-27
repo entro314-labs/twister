@@ -101,6 +101,11 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **A download could be redirected anywhere, and read whole into memory.**
+  Only the first URL was checked against the network's media servers, and
+  the 512 MB cap held only when the server stated a size. Every redirect is
+  now checked the same way, and the file is streamed to disk and cut off at
+  the cap.
 - **Post now emptied the draft before anything was posted.** A composer that
   did not open, or a post the site refused, cost the text. The draft now
   stays until the post has gone out.

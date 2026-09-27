@@ -225,6 +225,7 @@ pub fn start(app: &AppHandle, network: Network, request: Request) -> Result<()> 
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(300))
             .user_agent("Twister")
+            .redirect(redirects(network))
             .build();
         let Ok(client) = client else {
             site::notify(&app, "Could not start the download.");
@@ -249,6 +250,20 @@ pub fn start(app: &AppHandle, network: Network, request: Request) -> Result<()> 
     Ok(())
 }
 
+/// A redirect is followed only to the network's own CDN, over HTTPS, and not
+/// far: the allowlist the first URL passed must hold for every hop.
+fn redirects(network: Network) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= 5 {
+            attempt.error("too many redirects")
+        } else if on_cdn(network, attempt.url().as_str()).is_some() {
+            attempt.follow()
+        } else {
+            attempt.error("redirected off the network's media servers")
+        }
+    })
+}
+
 fn fetch(client: &reqwest::blocking::Client, url: &str, path: &Path) -> Result<()> {
     let response = client
         .get(url)
@@ -258,11 +273,23 @@ fn fetch(client: &reqwest::blocking::Client, url: &str, path: &Path) -> Result<(
     if response.content_length().is_some_and(|len| len > MAX_BYTES) {
         return Err(AppError::Internal("File too large.".into()));
     }
-    let bytes = response
-        .bytes()
-        .map_err(|e| AppError::Internal(format!("Read failed: {e}")))?;
+    save(response, path, MAX_BYTES)
+}
+
+/// Streams to `path` beside a `.part` file and cuts off past `max` bytes,
+/// whether or not the server said how big it was.
+fn save(body: impl std::io::Read, path: &Path, max: u64) -> Result<()> {
     let tmp = path.with_extension("part");
-    std::fs::write(&tmp, &bytes)?;
+    let mut file = std::fs::File::create(&tmp)?;
+    let written = std::io::copy(&mut body.take(max + 1), &mut file)
+        .map_err(|e| AppError::Internal(format!("Read failed: {e}")))?;
+    drop(file);
+    if written > max {
+        if let Err(err) = std::fs::remove_file(&tmp) {
+            log::warn!("could not remove {}: {err}", tmp.display());
+        }
+        return Err(AppError::Internal("File too large.".into()));
+    }
     std::fs::rename(&tmp, path)?;
     Ok(())
 }
@@ -273,6 +300,19 @@ use tauri::Manager;
 mod tests {
     use super::*;
     use crate::db::Media;
+
+    #[test]
+    fn a_body_past_the_cap_is_cut_off_and_leaves_nothing() {
+        let dir = std::env::temp_dir().join(format!("twister-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("a.jpg");
+        assert!(save(&b"0123456789"[..], &path, 5).is_err());
+        assert!(!path.exists());
+        assert!(!path.with_extension("part").exists());
+        save(&b"0123456789"[..], &path, 10).expect("fits");
+        assert_eq!(std::fs::read(&path).expect("reads"), b"0123456789");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_client_builds_with_the_provider_the_app_installs() {
