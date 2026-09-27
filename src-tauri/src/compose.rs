@@ -95,11 +95,13 @@ fn looks_like_url(run: &str) -> bool {
 }
 
 /// An emoji — however many code points it takes, a family or a flag or a
-/// keycap — weighs two as a whole.
+/// keycap — weighs two as a whole. A zero-width joiner alone does not make
+/// one: Indic scripts use it to shape a conjunct, and X counts those by code
+/// point.
 fn is_emoji(grapheme: &str) -> bool {
     grapheme
         .chars()
-        .any(|c| matches!(c as u32, 0x200D | 0xFE0F | 0x20E3 | 0x1F000..=0x1FAFF))
+        .any(|c| matches!(c as u32, 0xFE0F | 0x20E3 | 0x1F000..=0x1FAFF))
 }
 
 /// X weighs code points, not what a reader sees as one letter: Devanagari's
@@ -390,6 +392,9 @@ mod tests {
         assert_eq!(count("1️⃣"), 2);
         // Code points, not clusters: three clusters, six code points.
         assert_eq!(count("नमस्ते"), 6);
+        // A conjunct shaped with a zero-width joiner: every code point counts.
+        assert_eq!(count("क्\u{200D}ष"), 4);
+        assert_eq!(count("🏳️\u{200D}🌈"), 2);
         assert_eq!(
             count("see https://example.com/a/very/long/path/indeed ok"),
             4 + 23 + 3
