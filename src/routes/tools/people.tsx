@@ -11,6 +11,7 @@ import {
   Section,
   compact,
   pathOf,
+  rowKey,
   useRun,
 } from '@/components/tools/panel'
 import { Button } from '@/components/ui/button'
@@ -99,7 +100,7 @@ function PeopleScreen() {
         ? info.followingPage(handle)
         : '')
 
-  const chosen = rows.filter((p) => selected.has(p.id))
+  const chosen = rows.filter((p) => selected.has(rowKey(p)))
   const allChosen = rows.length > 0 && chosen.length === rows.length
 
   const act = (kind: 'follow' | 'unfollow') => {
@@ -240,7 +241,7 @@ function PeopleScreen() {
             type="checkbox"
             checked={allChosen}
             onChange={() => {
-              setSelected(allChosen ? new Set() : new Set(rows.map((p) => p.id)))
+              setSelected(allChosen ? new Set() : new Set(rows.map(rowKey)))
             }}
           />
           {chosen.length ? `${chosen.length} selected` : 'Select all'}
@@ -254,14 +255,15 @@ function PeopleScreen() {
           ) : (
             rows.map((person) => (
               <PersonRow
-                key={person.id}
+                key={rowKey(person)}
                 person={person}
-                checked={selected.has(person.id)}
+                checked={selected.has(rowKey(person))}
                 onToggle={() => {
                   setSelected((previous) => {
                     const next = new Set(previous)
-                    if (next.has(person.id)) next.delete(person.id)
-                    else next.add(person.id)
+                    const key = rowKey(person)
+                    if (next.has(key)) next.delete(key)
+                    else next.add(key)
                     return next
                   })
                 }}

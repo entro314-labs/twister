@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { useCancelOp, useOps } from '@/lib/query'
 import { humanMessage } from '@/lib/tauri/client'
-import type { ExportFormat, Job, OpKind } from '@/lib/tauri/types'
+import type { ExportFormat, Job, Network, OpKind } from '@/lib/tauri/types'
 import { cn } from '@/lib/utils'
 
 /** The frame every tool panel shares: a heading, a note, then sections. */
@@ -230,6 +230,11 @@ export function DryRunToggle({
       ))}
     </div>
   )
+}
+
+/** A row's identity in a selection: ids are only unique within a network. */
+export function rowKey(row: { network: Network; id: string }): string {
+  return `${row.network}:${row.id}`
 }
 
 export function pathOf(url: string | undefined): string {

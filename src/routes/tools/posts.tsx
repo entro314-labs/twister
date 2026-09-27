@@ -11,6 +11,7 @@ import {
   Section,
   compact,
   pathOf,
+  rowKey,
   shortDate,
   useRun,
 } from '@/components/tools/panel'
@@ -87,7 +88,7 @@ function PostsScreen() {
   const currentPath = pathOf(tab?.url)
   const canDelete = info.ops.includes('delete')
 
-  const chosen = rows.filter((p) => selected.has(p.id))
+  const chosen = rows.filter((p) => selected.has(rowKey(p)))
   const allChosen = rows.length > 0 && chosen.length === rows.length
   const allMine =
     Boolean(handle) &&
@@ -237,7 +238,7 @@ function PostsScreen() {
             type="checkbox"
             checked={allChosen}
             onChange={() => {
-              setSelected(allChosen ? new Set() : new Set(rows.map((p) => p.id)))
+              setSelected(allChosen ? new Set() : new Set(rows.map(rowKey)))
             }}
           />
           {chosen.length ? `${chosen.length} selected` : 'Select all'}
@@ -251,14 +252,15 @@ function PostsScreen() {
           ) : (
             rows.map((post) => (
               <PostRow
-                key={post.id}
+                key={rowKey(post)}
                 post={post}
-                checked={selected.has(post.id)}
+                checked={selected.has(rowKey(post))}
                 onToggle={() => {
                   setSelected((previous) => {
                     const next = new Set(previous)
-                    if (next.has(post.id)) next.delete(post.id)
-                    else next.add(post.id)
+                    const key = rowKey(post)
+                    if (next.has(key)) next.delete(key)
+                    else next.add(key)
                     return next
                   })
                 }}
