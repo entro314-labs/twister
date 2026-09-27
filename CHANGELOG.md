@@ -101,6 +101,9 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **An Instagram id sent as a number could be rounded** by the page's JSON
+  parser and stored as a second, wrong row. Ids are now read from Meta's
+  string forms, and a number too large to be exact is never used.
 - **Bluesky's `handle.invalid` was stored as a handle**, overwriting the
   real one and breaking that person's profile and post links until seen
   again. A sighting under that placeholder is now dropped.

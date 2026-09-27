@@ -27,10 +27,24 @@
   const ID = /^\d{1,25}$/
   const CODE = /^[A-Za-z0-9_-]{1,40}$/
 
+  // A person's or a post's id as text. Meta sends `pk` as a string in its
+  // GraphQL and inline data, but a REST answer may send a number, which past
+  // 2^53 has already been rounded by JSON.parse: then the string forms —
+  // `pk_id`, or `id` (a post's is `<pk>_<owner>`) — are used, and a rounded
+  // number never is.
+  function idOf(node) {
+    if (!node || typeof node !== 'object') return ''
+    if (typeof node.pk === 'string') return node.pk
+    if (typeof node.pk_id === 'string') return node.pk_id
+    if (typeof node.id === 'string') return node.id.split('_')[0]
+    if (Number.isSafeInteger(node.pk)) return String(node.pk)
+    return ''
+  }
+
   function readUser(node) {
     if (!node || typeof node !== 'object') return null
     const handle = str(node.username, 30)
-    const id = str(node.pk !== undefined ? String(node.pk) : node.id, 25)
+    const id = str(idOf(node), 25)
     if (!HANDLE.test(handle) || !ID.test(id)) return null
     const friendship = node.friendship_status && typeof node.friendship_status === 'object' ? node.friendship_status : null
     return {
@@ -82,7 +96,7 @@
 
   function readPost(node, into) {
     if (!node || typeof node !== 'object') return
-    const id = str(node.pk !== undefined ? String(node.pk) : '', 25)
+    const id = str(idOf(node), 25)
     const slug = str(node.code, 40)
     if (!ID.test(id) || !CODE.test(slug)) return
     const author = readUser(node.user)
@@ -95,11 +109,11 @@
     let quotedId = ''
     if (share.reposted_post && typeof share.reposted_post === 'object') {
       kind = 'repost'
-      repostOf = str(String(share.reposted_post.pk || ''), 25)
+      repostOf = str(idOf(share.reposted_post), 25)
       readPost(share.reposted_post, into)
     } else if (share.quoted_post && typeof share.quoted_post === 'object') {
       kind = 'quote'
-      quotedId = str(String(share.quoted_post.pk || ''), 25)
+      quotedId = str(idOf(share.quoted_post), 25)
       readPost(share.quoted_post, into)
     } else if (info.is_reply || info.reply_to_author) {
       kind = 'reply'
