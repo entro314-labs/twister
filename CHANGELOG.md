@@ -101,6 +101,15 @@ All notable changes to Twister are documented here. The format follows
 
 ### Fixed
 
+- **`twister-mcp` claimed MCP 2026-07-28 but spoke the handshake protocol.**
+  It answered every `initialize` with 2026-07-28 — a revision that has no
+  `initialize` — whatever the host asked for, had no `server/discover`, and
+  dropped unreadable frames without a reply. It now serves both eras: a
+  host that opens with `initialize` gets the revision it asked for; a modern
+  host names 2026-07-28 per request, can discover the server, and gets
+  `UnsupportedProtocolVersion` with the supported list for anything else.
+  An unknown tool is now a protocol error, and a broken frame gets a parse
+  error.
 - **A download could be redirected anywhere, and read whole into memory.**
   Only the first URL was checked against the network's media servers, and
   the 512 MB cap held only when the server stated a size. Every redirect is

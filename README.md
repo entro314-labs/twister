@@ -110,7 +110,9 @@ what each thread would have cost. The numbers live in `src/lib/api-costs.ts`.
 - **The agent door.** `twister-mcp` is an MCP server over the same store:
   `claude mcp add twister -- /path/to/twister-mcp`. Search, export, queue a
   scan or a follow run the app performs next, schedule posts — each on a
-  named network, X when none is given.
+  named network, X when none is given. It speaks MCP 2026-07-28 (no
+  handshake; `server/discover`) and the handshake revisions back to
+  2024-11-05, whichever the host opens with.
 - **The niceties**, each a switch in Settings:
   - *Following first* — opens the home timeline on Following, once per visit.
   - *Hide promoted posts.*

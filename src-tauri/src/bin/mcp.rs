@@ -25,16 +25,21 @@ fn main() {
         if line.trim().is_empty() {
             continue;
         }
-        let message: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(value) => value,
+        let answer = match serde_json::from_str::<serde_json::Value>(&line) {
+            Ok(message) => session.handle(&message),
             Err(err) => {
                 eprintln!("twister-mcp: unreadable frame: {err}");
-                continue;
+                Some(twister_lib::mcp::parse_error())
             }
         };
-        if let Some(answer) = session.handle(&message) {
-            let _ = writeln!(stdout, "{answer}");
-            let _ = stdout.flush();
+        if let Some(answer) = answer {
+            // A closed stdout means the host is gone.
+            if writeln!(stdout, "{answer}")
+                .and_then(|()| stdout.flush())
+                .is_err()
+            {
+                break;
+            }
         }
     }
 }

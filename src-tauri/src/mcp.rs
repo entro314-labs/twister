@@ -20,7 +20,47 @@ use crate::export::{self, Format};
 use crate::network::{self, Network};
 use crate::{ops, scheduler};
 
-const PROTOCOL_VERSION: &str = "2026-07-28";
+/// The modern revision: no handshake, every request names its version in
+/// `_meta`. A client on it may call anything straight away.
+const MODERN: &str = "2026-07-28";
+/// Handshake-era revisions, newest first, served to a client that opens with
+/// `initialize` — which is every client that predates the modern one.
+const LEGACY: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+const META_VERSION: &str = "io.modelcontextprotocol/protocolVersion";
+const META_SERVER: &str = "io.modelcontextprotocol/serverInfo";
+/// How long a client may keep the tool list: it only changes with a build.
+const LIST_TTL_MS: u64 = 3_600_000;
+
+const INSTRUCTIONS: &str = "Twister is a desktop client for X, Bluesky, Threads and Instagram. \
+    This server reads the people and posts the app has seen each site load (it never calls an \
+    API itself) and queues operations the app runs in its signed-in page on one network. Queued \
+    jobs run only while the Twister app is open, one at a time, and default to dry runs; Threads \
+    and Instagram accept scans only. Every row carries a `network` (x, bluesky, threads, \
+    instagram). Call store_summary first to learn what has been captured, where, and from which \
+    source.";
+
+fn supported_versions() -> Vec<&'static str> {
+    std::iter::once(MODERN)
+        .chain(LEGACY.iter().copied())
+        .collect()
+}
+
+fn server_info() -> Value {
+    json!({ "name": "twister", "version": env!("CARGO_PKG_VERSION") })
+}
+
+fn error(id: &Value, code: i64, message: &str, data: Option<Value>) -> Value {
+    let mut error = json!({ "code": code, "message": message });
+    if let Some(data) = data {
+        error["data"] = data;
+    }
+    json!({ "jsonrpc": "2.0", "id": id, "error": error })
+}
+
+/// The answer to a frame that is not JSON at all.
+pub fn parse_error() -> Value {
+    error(&Value::Null, -32700, "Parse error", None)
+}
 
 pub struct Session {
     db: Arc<Db>,
@@ -31,47 +71,95 @@ impl Session {
         Self { db }
     }
 
-    /// One frame. `None` for a notification, which must not be answered.
+    /// One frame. `None` for a notification or a response, neither of which
+    /// is answered.
+    ///
+    /// Both eras of the protocol are served. A client that opens with
+    /// `initialize` gets the newest handshake revision it asked for; a modern
+    /// one names its revision in each request's `_meta` and is refused with
+    /// the supported list when it names one this server does not speak.
+    /// Results carry the modern fields (`resultType`, the server's identity,
+    /// cache hints on lists), which a handshake-era client ignores.
     pub fn handle(&self, message: &Value) -> Option<Value> {
         let id = message.get("id").cloned()?;
-        let method = message.get("method").and_then(Value::as_str).unwrap_or("");
+        let method = message.get("method").and_then(Value::as_str)?;
         let params = message.get("params").cloned().unwrap_or(Value::Null);
-        let outcome = match method {
-            "initialize" => Ok(json!({
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": { "tools": { "listChanged": false } },
-                "serverInfo": { "name": "twister", "version": env!("CARGO_PKG_VERSION") },
-                "instructions":
-                    "Twister is a desktop client for X, Bluesky, Threads and Instagram. This \
-                     server reads the people and posts the app has seen each site load (it never \
-                     calls an API itself) and queues operations the app runs in its signed-in \
-                     page on one network. Queued jobs run only while the Twister app is open, one \
-                     at a time, and default to dry runs; Threads and Instagram accept scans only. \
-                     Every row carries a `network` (x, bluesky, threads, instagram). Call \
-                     store_summary first to learn what has been captured, where, and from which \
-                     source."
-            })),
-            "tools/list" => Ok(json!({ "tools": tools() })),
-            "tools/call" => self.call(&params),
-            "ping" => Ok(json!({})),
+        if method != "initialize"
+            && let Some(requested) = params
+                .get("_meta")
+                .and_then(|meta| meta.get(META_VERSION))
+                .and_then(Value::as_str)
+            && requested != MODERN
+        {
+            return Some(error(
+                &id,
+                -32022,
+                "Unsupported protocol version",
+                Some(json!({ "supported": supported_versions(), "requested": requested })),
+            ));
+        }
+        let mut result = match method {
+            "initialize" => {
+                let requested = params
+                    .get("protocolVersion")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let version = LEGACY
+                    .iter()
+                    .copied()
+                    .find(|v| *v == requested)
+                    .unwrap_or(LEGACY[0]);
+                json!({
+                    "protocolVersion": version,
+                    "capabilities": { "tools": { "listChanged": false } },
+                    "serverInfo": server_info(),
+                    "instructions": INSTRUCTIONS,
+                })
+            }
+            "server/discover" => json!({
+                "supportedVersions": supported_versions(),
+                "capabilities": { "tools": {} },
+                "instructions": INSTRUCTIONS,
+                "ttlMs": LIST_TTL_MS,
+                "cacheScope": "public",
+            }),
+            "tools/list" => json!({
+                "tools": tools(),
+                "ttlMs": LIST_TTL_MS,
+                "cacheScope": "public",
+            }),
+            "tools/call" => {
+                let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+                if !tools().iter().any(|tool| tool["name"] == name) {
+                    return Some(error(&id, -32602, &format!("Unknown tool `{name}`"), None));
+                }
+                match self.call(name, &params) {
+                    Ok(result) => result,
+                    Err(err) => json!({
+                        "isError": true,
+                        "content": [{ "type": "text", "text": err.message() }],
+                    }),
+                }
+            }
+            // Handshake-era only; the modern revision retired it.
+            "ping" => json!({}),
             other => {
-                return Some(json!({
-                    "jsonrpc": "2.0", "id": id,
-                    "error": { "code": -32601, "message": format!("unknown method `{other}`") }
-                }));
+                return Some(error(
+                    &id,
+                    -32601,
+                    &format!("Unknown method `{other}`"),
+                    None,
+                ));
             }
         };
-        Some(match outcome {
-            Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
-            Err(err) => json!({
-                "jsonrpc": "2.0", "id": id,
-                "result": { "isError": true, "content": [{ "type": "text", "text": err.to_string() }] }
-            }),
-        })
+        if method != "initialize" {
+            result["resultType"] = json!("complete");
+            result["_meta"] = json!({ META_SERVER: server_info() });
+        }
+        Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
     }
 
-    fn call(&self, params: &Value) -> Result<Value> {
-        let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+    fn call(&self, name: &str, params: &Value) -> Result<Value> {
         let args = params.get("arguments").cloned().unwrap_or(json!({}));
         let text = match name {
             "store_summary" => self.summary()?,
@@ -345,12 +433,58 @@ mod tests {
     }
 
     #[test]
-    fn initialize_and_notifications() {
+    fn both_eras_are_served() {
         let session = session();
-        let answer = session
-            .handle(&json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }))
+        // A handshake-era client gets the revision it asked for, or the newest.
+        let asked = session
+            .handle(&json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": { "protocolVersion": "2025-06-18" } }))
             .expect("answer");
-        assert_eq!(answer["result"]["protocolVersion"], PROTOCOL_VERSION);
+        assert_eq!(asked["result"]["protocolVersion"], "2025-06-18");
+        let unknown = session
+            .handle(&json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": { "protocolVersion": "1999-01-01" } }))
+            .expect("answer");
+        assert_eq!(unknown["result"]["protocolVersion"], LEGACY[0]);
+
+        // A modern client discovers, then calls with its version in _meta.
+        let discovered = session
+            .handle(
+                &json!({ "jsonrpc": "2.0", "id": 2, "method": "server/discover",
+                "params": { "_meta": { META_VERSION: MODERN } } }),
+            )
+            .expect("answer");
+        assert_eq!(discovered["result"]["supportedVersions"][0], MODERN);
+        assert_eq!(discovered["result"]["resultType"], "complete");
+        assert_eq!(
+            discovered["result"]["_meta"][META_SERVER]["name"],
+            "twister"
+        );
+        let listed = session
+            .handle(&json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list",
+                "params": { "_meta": { META_VERSION: MODERN } } }))
+            .expect("answer");
+        assert_eq!(listed["result"]["cacheScope"], "public");
+        assert!(listed["result"]["ttlMs"].as_u64().is_some());
+        let refused = session
+            .handle(&json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/list",
+                "params": { "_meta": { META_VERSION: "1900-01-01" } } }))
+            .expect("answer");
+        assert_eq!(refused["error"]["code"], -32022);
+        assert_eq!(refused["error"]["data"]["requested"], "1900-01-01");
+        assert_eq!(refused["error"]["data"]["supported"][0], MODERN);
+
+        // An unknown tool is a protocol error, not a tool result.
+        let tool = call(&session, "nope", json!({}));
+        assert_eq!(tool["error"]["code"], -32602);
+        // A response from the client is not answered.
+        assert!(
+            session
+                .handle(&json!({ "jsonrpc": "2.0", "id": 9, "result": {} }))
+                .is_none()
+        );
+        assert_eq!(parse_error()["error"]["code"], -32700);
+        assert!(parse_error()["id"].is_null());
         assert!(
             session
                 .handle(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))
