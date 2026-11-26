@@ -1,11 +1,11 @@
 [package]
 name = "twister"
-version = "0.1.0"
+version = "1.0.0"
 description = "Twister - a desktop client for X with niceties injected"
 authors = ["entro314-labs"]
 license = "MIT"
 edition = "2024"
-rust-version = "1.98.1"
+rust-version = "1.99.1"
 # Two binaries; `cargo run` (and `tauri dev`) mean the app.
 default-run = "twister"
 
@@ -50,7 +50,7 @@ env_logger = "0.11"
 
 # The store: everything the capture hook sees, jobs, scheduled posts,
 # downloads. One file in the app data directory.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41.0", features = ["bundled"] }
 # Scheduling is civil-time arithmetic, and post dates come back as RFC 3339.
 chrono = { version = "0.4", features = ["serde"] }
 # Media downloads and the update probes only: public CDN and releases URLs,
